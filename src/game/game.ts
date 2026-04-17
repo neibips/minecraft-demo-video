@@ -236,6 +236,15 @@ export class Minecraft2Game {
       onToggleInventory: () => this.toggleInventory(),
       onTogglePause: () => this.togglePause(),
     })
+    this.player.setResources(
+      this.atlas,
+      (itemId) => {
+        const item = this.registries.items.get(itemId)
+        const blockId = item?.placeableBlockId
+        return blockId ? this.registries.blocks.get(blockId) : undefined
+      },
+      (itemId) => this.registries.items.get(itemId),
+    )
     this.player.setMouseSensitivity(this.settings.mouseSensitivity)
 
     this.player.camera.inertia = 0
@@ -391,10 +400,8 @@ export class Minecraft2Game {
   }
 
   private syncHeldItem(): void {
-    const itemId = this.getSelectedHotbarSlot()?.itemId
-    const item = itemId ? this.registries.items.get(itemId) : undefined
-    const isBlock = Boolean(item?.placeableBlockId ?? item?.category === 'block')
-    this.player?.setHeldTexture(item?.texture ?? null, isBlock)
+    const itemId = this.getSelectedHotbarSlot()?.itemId ?? null
+    this.player?.setHeldItem(itemId)
   }
 
   private getCurrentCraftMatch(grid: NullableInventorySlot[], width: number, height: number): NullableInventorySlot {

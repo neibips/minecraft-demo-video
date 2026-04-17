@@ -3,7 +3,7 @@
 import { CHUNK_SIZE, SEA_LEVEL, WORLD_HEIGHT } from '../config'
 import type { BiomeId, ChunkWorkerResponse, SurfaceSpawnHint } from '../types'
 import { getHeightIndex, getVoxelIndex } from '../utils/chunk'
-import { createSeededRandom, hashString } from '../utils/math'
+import { clamp, createSeededRandom, hashString } from '../utils/math'
 import { createNoiseTools } from '../world/noise'
 import type { WorldWorkerMessage, WorldWorkerResponse } from '../world/protocol'
 
@@ -13,35 +13,61 @@ let noise = createNoiseTools(seed)
 
 interface TerrainSample {
   height: number
-  moisture: number
-  river: number
+  temperature: number
+  humidity: number
+  continentalness: number
   mountainMask: number
   biome: BiomeId
 }
 
-const MOUNTAIN_MASK_THRESHOLD = 0.42
-const MOUNTAIN_MAX_LIFT = 58
-const PLAINS_DIRT_DEPTH = 5
+const CONTINENTAL_LAND_THRESHOLD = 0.02
+const CONTINENTAL_COAST_FADE = 0.18
+const MOUNTAIN_INTERSECTION_THRESHOLD = 0.68
+const PLAINS_DIRT_DEPTH = 4
+const FOREST_TREE_THRESHOLD = 0.6
+const PLAINS_TREE_THRESHOLD = 0.7
+const FOREST_TREE_SPACING = 4
+const PLAINS_TREE_SPACING = 5
+const FLOWER_FOREST_THRESHOLD = 0.72
+const FLOWER_PLAINS_THRESHOLD = 0.78
+const SHALLOW_WATER_MAX_DEPTH = 3
 
-const getSurfaceBiome = (
-  height: number,
-  moisture: number,
-  river: number,
-  mountainMask: number,
-): BiomeId => {
-  if (mountainMask > MOUNTAIN_MASK_THRESHOLD && height > SEA_LEVEL + 10) {
-    return 'mountains'
+const normalizeNoise = (value: number): number => value * 0.5 + 0.5
+
+const remap01 = (value: number, min: number, max: number): number => {
+  if (max <= min) {
+    return value >= max ? 1 : 0
   }
-  if (height <= SEA_LEVEL + 1 && river > 0.28) {
+  return clamp((value - min) / (max - min), 0, 1)
+}
+
+const isDominatedByNeighbor = (score: number, neighborScore: number, dx: number, dz: number): boolean =>
+  neighborScore > score + 1e-6 ||
+  (Math.abs(neighborScore - score) <= 1e-6 && (dz < 0 || (dz === 0 && dx < 0)))
+
+const getSurfaceBiome = (sample: TerrainSample): BiomeId => {
+  if (sample.height <= SEA_LEVEL) {
     return 'lake'
   }
-  if (height <= SEA_LEVEL + 3 || river > 0.52) {
+
+  const coastBlend = remap01(
+    sample.continentalness,
+    CONTINENTAL_LAND_THRESHOLD,
+    CONTINENTAL_LAND_THRESHOLD + CONTINENTAL_COAST_FADE,
+  )
+  if (sample.height <= SEA_LEVEL + 3 || coastBlend < 0.34) {
     return 'beach'
   }
-  if (moisture > 0.12) {
-    return 'forest'
+
+  if (sample.mountainMask > 0.2 && sample.height >= SEA_LEVEL + 14) {
+    return 'mountains'
   }
-  return 'plains'
+
+  const forestSuitability =
+    sample.humidity * 0.72 +
+    clamp(1 - Math.abs(sample.temperature - 0.56) * 1.4, 0, 1) * 0.28
+
+  return forestSuitability > 0.58 ? 'forest' : 'plains'
 }
 
 const setBlock = (blocks: Uint16Array, x: number, y: number, z: number, blockId: string): void => {
@@ -71,9 +97,10 @@ const addTree = (
   worldZ: number,
   random: () => number,
 ): void => {
-  const variation = (noise.value2d(worldX * 0.23, worldZ * 0.23) + 1) * 0.5
-  const extra = random() * 0.5
-  const trunkHeight = 4 + Math.floor((variation * 0.7 + extra) * 6)
+  const variation = (noise.value2d(worldX * 0.18, worldZ * 0.18) + 1) * 0.5
+  const extra = random() * 0.45
+  const trunkHeight = 4 + Math.floor((variation * 0.65 + extra) * 6)
+
   for (let offset = 0; offset < trunkHeight; offset += 1) {
     setBlock(blocks, x, y + offset, z, 'wood')
   }
@@ -111,35 +138,94 @@ const createTerrainSampler = () => {
       return cached
     }
 
-    const continental = noise.fbm2d(worldX * 0.0072, worldZ * 0.0072, 5, 2, 0.5)
-    const detail = noise.fbm2d(worldX * 0.042, worldZ * 0.042, 3, 2, 0.5)
-    const rolling = noise.fbm2d(worldX * 0.017 + 17, worldZ * 0.017 - 43, 3, 2, 0.5)
-    const ridge = 1 - Math.abs(noise.fbm2d(worldX * 0.013 + 320, worldZ * 0.013 - 190, 4, 2, 0.5))
-    const mountainMaskRaw = noise.fbm2d(worldX * 0.0045 + 610, worldZ * 0.0045 - 350, 3, 2, 0.55)
-    const moisture = noise.fbm2d(worldX * 0.019 + 200, worldZ * 0.019 - 150, 4, 2, 0.55)
-    const riverNoise = Math.abs(noise.fbm2d(worldX * 0.006 - 540, worldZ * 0.006 + 260, 3, 2, 0.5))
-    const river = Math.max(0, 1 - riverNoise / 0.12)
+    const warpX = noise.value2d(worldX * 0.0018 + 140, worldZ * 0.0018 - 210) * 88
+    const warpZ = noise.value2d(worldX * 0.0018 - 630, worldZ * 0.0018 + 470) * 88
+    const warpedX = worldX + warpX
+    const warpedZ = worldZ + warpZ
 
-    let mountainLift = 0
-    if (mountainMaskRaw > MOUNTAIN_MASK_THRESHOLD) {
-      const normalized = (mountainMaskRaw - MOUNTAIN_MASK_THRESHOLD) / (1 - MOUNTAIN_MASK_THRESHOLD)
-      const ridgeFactor = Math.max(0, (ridge - 0.35) / 0.65)
-      mountainLift = Math.pow(normalized, 1.4) * Math.pow(ridgeFactor, 1.2) * MOUNTAIN_MAX_LIFT
+    const continentalBase = noise.fbm2d(warpedX * 0.00155, warpedZ * 0.00155, 5, 2.04, 0.52)
+    const continentalSecondary = noise.value2d(warpedX * 0.00072 + 390, warpedZ * 0.00072 - 250)
+    const spawnBias = Math.max(0, 1 - Math.hypot(worldX, worldZ) / 720) * 0.16
+    const continentalness = continentalBase * 0.74 + continentalSecondary * 0.26 + spawnBias
+    const inlandness = remap01(continentalness, CONTINENTAL_LAND_THRESHOLD + 0.03, 0.52)
+    const landRise = remap01(continentalness, CONTINENTAL_LAND_THRESHOLD - 0.16, 0.36)
+
+    const macroRelief = noise.fbm2d(warpedX * 0.0058, warpedZ * 0.0058, 5, 2, 0.52)
+    const hills = noise.fbm2d(warpedX * 0.0128 + 140, warpedZ * 0.0128 - 90, 5, 2.06, 0.49)
+    const surfaceDetail = noise.fbm2d(warpedX * 0.028 - 360, warpedZ * 0.028 + 220, 4, 2.12, 0.45)
+    const oceanRelief = noise.fbm2d(warpedX * 0.0096 - 920, warpedZ * 0.0096 + 760, 4, 2.08, 0.5)
+
+    const mountainMaskA = normalizeNoise(
+      noise.fbm2d(warpedX * 0.00118 + 910, warpedZ * 0.00118 - 810, 4, 2.02, 0.56),
+    )
+    const mountainMaskB = normalizeNoise(
+      noise.fbm2d(warpedX * 0.00105 - 1410, warpedZ * 0.00105 + 1280, 4, 2.04, 0.55),
+    )
+    const mountainIntersection = Math.min(mountainMaskA, mountainMaskB)
+    const mountainMask =
+      remap01(mountainIntersection, MOUNTAIN_INTERSECTION_THRESHOLD, 0.91) *
+      remap01(inlandness, 0.08, 1)
+    const mountainShape = noise.ridged2d(warpedX * 0.0078 + 220, warpedZ * 0.0078 - 310, 5, 2.08, 0.52)
+    const mountainPeaks = noise.ridged2d(warpedX * 0.0164 - 540, warpedZ * 0.0164 + 430, 4, 2.18, 0.48)
+
+    let rawHeight = SEA_LEVEL - 6
+    if (continentalness < CONTINENTAL_LAND_THRESHOLD) {
+      const oceanDepth = remap01(CONTINENTAL_LAND_THRESHOLD - continentalness, 0, 0.6)
+      rawHeight = SEA_LEVEL - 4 - oceanDepth * 18 + oceanRelief * 3 + macroRelief * 2
+    } else {
+      const baseLandHeight = SEA_LEVEL + 3 + landRise * 12 + macroRelief * 10 + hills * 6 + surfaceDetail * 2.5
+      const mountainLiftFactor = mountainMask > 0 ? Math.pow(mountainMask, 0.72) : 0
+      const mountainTargetLift = 80 + mountainPeaks * 40
+      const mountainLift = Math.min(
+        Math.max(0, WORLD_HEIGHT - 6 - baseLandHeight),
+        mountainTargetLift * mountainLiftFactor * (0.4 + mountainShape * 0.6),
+      )
+      rawHeight = baseLandHeight + mountainLift
     }
 
-    const baseLift = continental * 3 + rolling * 2 + detail * 1.1
-    const riverCut = river * 7
-    const rawHeight = SEA_LEVEL + 2 + baseLift + mountainLift - riverCut
-    const height = Math.max(6, Math.min(WORLD_HEIGHT - 4, Math.floor(rawHeight)))
-    const biome = getSurfaceBiome(height, moisture, river, mountainMaskRaw)
+    const coastDistance = Math.abs(continentalness - CONTINENTAL_LAND_THRESHOLD)
+    const coastInfluence = 1 - remap01(coastDistance, 0.05, 0.23)
+    if (coastInfluence > 0) {
+      const shorelineBlend = remap01(
+        continentalness,
+        CONTINENTAL_LAND_THRESHOLD - 0.08,
+        CONTINENTAL_LAND_THRESHOLD + 0.14,
+      )
+      const shorelineHeight =
+        SEA_LEVEL - 2 + shorelineBlend * 5 + macroRelief * 1.4 + surfaceDetail * 0.8
+      rawHeight = rawHeight * (1 - coastInfluence) + shorelineHeight * coastInfluence
+    }
+
+    const height = Math.max(5, Math.min(WORLD_HEIGHT - 4, Math.floor(rawHeight)))
+
+    const temperatureNoise = noise.fbm2d(worldX * 0.0022 - 720, worldZ * 0.0022 + 640, 5, 2.02, 0.55)
+    const temperatureCell = noise.value2d(worldX * 0.0009 + 1080, worldZ * 0.0009 - 1140)
+    const temperature = clamp(
+      normalizeNoise(temperatureNoise) * 0.78 +
+        normalizeNoise(temperatureCell) * 0.22 -
+        remap01(height, SEA_LEVEL + 18, WORLD_HEIGHT - 10) * 0.18,
+      0,
+      1,
+    )
+
+    const humidityNoise = noise.fbm2d(worldX * 0.0025 + 250, worldZ * 0.0025 - 510, 5, 2.04, 0.56)
+    const humidityCell = noise.value2d(worldX * 0.0062 - 370, worldZ * 0.0062 + 820)
+    const humidity = clamp(
+      normalizeNoise(humidityNoise) * 0.74 + normalizeNoise(humidityCell) * 0.26,
+      0,
+      1,
+    )
 
     const sample: TerrainSample = {
       height,
-      moisture,
-      river,
-      mountainMask: mountainMaskRaw,
-      biome,
+      temperature,
+      humidity,
+      continentalness,
+      mountainMask,
+      biome: 'plains',
     }
+    sample.biome = getSurfaceBiome(sample)
+
     cache.set(key, sample)
     return sample
   }
@@ -151,11 +237,11 @@ const isSandyColumn = (
   worldZ: number,
   sample: TerrainSample,
 ): boolean => {
-  if (sample.height <= SEA_LEVEL + 2 || sample.river > 0.45) {
+  if (sample.biome === 'beach' || sample.biome === 'lake') {
     return true
   }
 
-  if (sample.height > SEA_LEVEL + 4) {
+  if (sample.height > SEA_LEVEL + 5) {
     return false
   }
 
@@ -170,15 +256,244 @@ const isSandyColumn = (
   return false
 }
 
-const shouldCarveCave = (worldX: number, y: number, worldZ: number, surfaceY: number): boolean => {
-  if (y <= 3 || y >= surfaceY - 5) {
+const getTreePlacementScore = (
+  sample: TerrainSample,
+  biome: BiomeId,
+  worldX: number,
+  worldZ: number,
+): number => {
+  const grove = normalizeNoise(noise.value2d(worldX * 0.052 + 280, worldZ * 0.052 - 470))
+  const cluster = normalizeNoise(noise.value2d(worldX * 0.018 - 910, worldZ * 0.018 + 660))
+  if (biome === 'forest') {
+    return grove * 0.58 + cluster * 0.22 + sample.humidity * 0.2
+  }
+  return grove * 0.48 + cluster * 0.18 + sample.humidity * 0.34
+}
+
+const canPlaceTree = (
+  sampleTerrain: (worldX: number, worldZ: number) => TerrainSample,
+  sample: TerrainSample,
+  biome: BiomeId,
+  worldX: number,
+  worldZ: number,
+): boolean => {
+  if (biome !== 'forest' && biome !== 'plains') {
     return false
   }
 
-  const cavernNoise = noise.fbm3d(worldX * 0.055, y * 0.078, worldZ * 0.055, 3, 2, 0.5)
-  const tunnelNoise = Math.abs(noise.value3d(worldX * 0.028 + 160, y * 0.044 - 120, worldZ * 0.028 - 240))
+  const score = getTreePlacementScore(sample, biome, worldX, worldZ)
+  const threshold = biome === 'forest' ? FOREST_TREE_THRESHOLD : PLAINS_TREE_THRESHOLD
+  if (score < threshold) {
+    return false
+  }
 
-  return cavernNoise > 0.72 || (tunnelNoise < 0.04 && cavernNoise > 0.4)
+  const spacing = biome === 'forest' ? FOREST_TREE_SPACING : PLAINS_TREE_SPACING
+  for (let dz = -spacing; dz <= spacing; dz += 1) {
+    for (let dx = -spacing; dx <= spacing; dx += 1) {
+      if ((dx === 0 && dz === 0) || dx * dx + dz * dz > spacing * spacing) {
+        continue
+      }
+
+      const neighbor = sampleTerrain(worldX + dx, worldZ + dz)
+      if ((neighbor.biome !== 'forest' && neighbor.biome !== 'plains') || neighbor.height <= SEA_LEVEL + 1) {
+        continue
+      }
+
+      const neighborScore = getTreePlacementScore(neighbor, neighbor.biome, worldX + dx, worldZ + dz)
+      if (isDominatedByNeighbor(score, neighborScore, dx, dz)) {
+        return false
+      }
+    }
+  }
+
+  return true
+}
+
+const getFlowerPlacementScore = (sample: TerrainSample, worldX: number, worldZ: number): number => {
+  const patch = normalizeNoise(noise.value2d(worldX * 0.051 - 320, worldZ * 0.051 + 540))
+  const scatter = normalizeNoise(noise.value2d(worldX * 0.123 + 880, worldZ * 0.123 - 710))
+  return patch * 0.54 + scatter * 0.14 + sample.humidity * 0.32
+}
+
+const shouldPlaceFlower = (sample: TerrainSample, biome: BiomeId, worldX: number, worldZ: number): boolean => {
+  if (biome !== 'forest' && biome !== 'plains') {
+    return false
+  }
+
+  const threshold = biome === 'forest' ? FLOWER_FOREST_THRESHOLD : FLOWER_PLAINS_THRESHOLD
+  return getFlowerPlacementScore(sample, worldX, worldZ) > threshold
+}
+
+const getClayPatchScore = (worldX: number, worldZ: number): number => {
+  const patch = normalizeNoise(noise.value2d(worldX * 0.072 + 720, worldZ * 0.072 - 930))
+  const variation = normalizeNoise(noise.value2d(worldX * 0.024 - 1840, worldZ * 0.024 + 1570))
+  return patch * 0.68 + variation * 0.32
+}
+
+const canStartClayPatch = (
+  sampleTerrain: (worldX: number, worldZ: number) => TerrainSample,
+  worldX: number,
+  worldZ: number,
+  sample: TerrainSample,
+  sandyColumn: boolean,
+): boolean => {
+  const waterDepth = SEA_LEVEL - sample.height
+  if (!sandyColumn || waterDepth < 1 || waterDepth > SHALLOW_WATER_MAX_DEPTH) {
+    return false
+  }
+
+  const score = getClayPatchScore(worldX, worldZ)
+  if (score < 0.84) {
+    return false
+  }
+
+  let shallowSandCount = 0
+  let totalCount = 0
+  for (let dz = -3; dz <= 3; dz += 1) {
+    for (let dx = -3; dx <= 3; dx += 1) {
+      if (dx * dx + dz * dz > 9) {
+        continue
+      }
+      totalCount += 1
+      const neighbor = sampleTerrain(worldX + dx, worldZ + dz)
+      const neighborDepth = SEA_LEVEL - neighbor.height
+      if (
+        neighborDepth >= 0 &&
+        neighborDepth <= SHALLOW_WATER_MAX_DEPTH &&
+        isSandyColumn(sampleTerrain, worldX + dx, worldZ + dz, neighbor)
+      ) {
+        shallowSandCount += 1
+      }
+    }
+  }
+  if (shallowSandCount < Math.ceil(totalCount * 0.75)) {
+    return false
+  }
+
+  for (let dz = -4; dz <= 4; dz += 1) {
+    for (let dx = -4; dx <= 4; dx += 1) {
+      if ((dx === 0 && dz === 0) || dx * dx + dz * dz > 16) {
+        continue
+      }
+
+      const neighbor = sampleTerrain(worldX + dx, worldZ + dz)
+      const neighborDepth = SEA_LEVEL - neighbor.height
+      if (
+        neighborDepth < 1 ||
+        neighborDepth > SHALLOW_WATER_MAX_DEPTH ||
+        !isSandyColumn(sampleTerrain, worldX + dx, worldZ + dz, neighbor)
+      ) {
+        continue
+      }
+
+      const neighborScore = getClayPatchScore(worldX + dx, worldZ + dz)
+      if (isDominatedByNeighbor(score, neighborScore, dx, dz)) {
+        return false
+      }
+    }
+  }
+
+  return true
+}
+
+const paintClayPatch = (
+  blocks: Uint16Array,
+  terrain: TerrainSample[],
+  sampleTerrain: (worldX: number, worldZ: number) => TerrainSample,
+  coordX: number,
+  coordZ: number,
+  centerLocalX: number,
+  centerLocalZ: number,
+): void => {
+  const centerWorldX = coordX * CHUNK_SIZE + centerLocalX
+  const centerWorldZ = coordZ * CHUNK_SIZE + centerLocalZ
+  const radius = 2 + Math.floor(normalizeNoise(noise.value2d(centerWorldX * 0.16 + 110, centerWorldZ * 0.16 - 170)) * 2)
+  const fillRadius = Math.max(1, radius - 1)
+  const fillRadiusSq = fillRadius * fillRadius
+
+  for (let dz = -radius; dz <= radius; dz += 1) {
+    for (let dx = -radius; dx <= radius; dx += 1) {
+      if (dx * dx + dz * dz > fillRadiusSq) {
+        continue
+      }
+
+      const localX = centerLocalX + dx
+      const localZ = centerLocalZ + dz
+      if (localX < 0 || localX >= CHUNK_SIZE || localZ < 0 || localZ >= CHUNK_SIZE) {
+        continue
+      }
+
+      const index = getHeightIndex(localX, localZ)
+      const sample = terrain[index]
+      const worldX = coordX * CHUNK_SIZE + localX
+      const worldZ = coordZ * CHUNK_SIZE + localZ
+      const waterDepth = SEA_LEVEL - sample.height
+      if (
+        waterDepth < 1 ||
+        waterDepth > SHALLOW_WATER_MAX_DEPTH ||
+        !isSandyColumn(sampleTerrain, worldX, worldZ, sample)
+      ) {
+        continue
+      }
+
+      if (getBlock(blocks, localX, sample.height, localZ) === blockCodes.sand) {
+        setBlock(blocks, localX, sample.height, localZ, 'clay')
+      }
+    }
+  }
+}
+
+const shouldCarveCave = (worldX: number, y: number, worldZ: number, surfaceY: number): boolean => {
+  const burialDepth = surfaceY - y
+  if (y <= 4 || burialDepth < 2) {
+    return false
+  }
+
+  const depthMask = remap01(burialDepth, 3, 44)
+  const caveDensity = normalizeNoise(
+    noise.fbm2d(worldX * 0.0082 + 540, worldZ * 0.0082 - 620, 3, 2.04, 0.55),
+  )
+
+  const tunnelA = Math.abs(noise.value3d(worldX * 0.034, y * 0.03, worldZ * 0.034))
+  const tunnelB = Math.abs(
+    noise.value3d(worldX * 0.024 + 190, y * 0.022 - 120, worldZ * 0.024 - 260),
+  )
+  const tunnelWarp = noise.fbm3d(
+    worldX * 0.017 - 480,
+    y * 0.019 + 340,
+    worldZ * 0.017 + 210,
+    3,
+    2.08,
+    0.52,
+  )
+  const spaghetti = Math.min(tunnelA, Math.abs(tunnelB + tunnelWarp * 0.35))
+  const tunnelThreshold = 0.05 + depthMask * 0.028 + caveDensity * 0.018
+
+  const chamberNoise = noise.fbm3d(worldX * 0.021, y * 0.025, worldZ * 0.021, 4, 2.02, 0.5)
+  const chamberShape = noise.ridged3d(
+    worldX * 0.016 + 310,
+    y * 0.019 - 140,
+    worldZ * 0.016 - 270,
+    3,
+    2.06,
+    0.5,
+  )
+  const chamberThreshold = 0.54 - depthMask * 0.08
+  const chamber = chamberNoise > chamberThreshold && chamberShape > 0.36 + (1 - caveDensity) * 0.08
+
+  const nearSurface = burialDepth <= 7 && y > SEA_LEVEL - 6
+  const entranceMask = noise.ridged2d(worldX * 0.026 + 180, worldZ * 0.026 - 320, 3, 2.08, 0.52)
+  const entrance =
+    nearSurface &&
+    caveDensity > 0.46 &&
+    entranceMask > 0.66 &&
+    spaghetti < tunnelThreshold + 0.024
+
+  if (burialDepth < 3 && !entrance) {
+    return false
+  }
+
+  return spaghetti < tunnelThreshold || chamber || entrance
 }
 
 const carveOre = (blocks: Uint16Array, x: number, y: number, z: number, blockId: string, radius: number): void => {
@@ -204,7 +519,7 @@ const generateChunk = (coordX: number, coordZ: number): ChunkWorkerResponse => {
   const terrain: TerrainSample[] = new Array(CHUNK_SIZE * CHUNK_SIZE)
   const spawns: SurfaceSpawnHint[] = []
   const sampleTerrain = createTerrainSampler()
-  const random = createSeededRandom(hashString(`${seed}:${coordX}:${coordZ}`))
+  const chunkRandom = createSeededRandom(hashString(`${seed}:${coordX}:${coordZ}`))
 
   for (let localZ = 0; localZ < CHUNK_SIZE; localZ += 1) {
     for (let localX = 0; localX < CHUNK_SIZE; localX += 1) {
@@ -241,7 +556,7 @@ const generateChunk = (coordX: number, coordZ: number): ChunkWorkerResponse => {
 
         const depth = surfaceY - y
         if (depth === 0) {
-          if (isMountain && surfaceY > SEA_LEVEL + 24) {
+          if (isMountain && surfaceY > SEA_LEVEL + 18) {
             setBlock(blocks, localX, y, localZ, 'stone')
           } else if (sandyColumn) {
             setBlock(blocks, localX, y, localZ, 'sand')
@@ -269,8 +584,21 @@ const generateChunk = (coordX: number, coordZ: number): ChunkWorkerResponse => {
 
   for (let localZ = 1; localZ < CHUNK_SIZE - 1; localZ += 1) {
     for (let localX = 1; localX < CHUNK_SIZE - 1; localX += 1) {
+      const worldX = coordX * CHUNK_SIZE + localX
+      const worldZ = coordZ * CHUNK_SIZE + localZ
+      const index = getHeightIndex(localX, localZ)
+      const sample = terrain[index]
+      if (canStartClayPatch(sampleTerrain, worldX, worldZ, sample, isSandyColumn(sampleTerrain, worldX, worldZ, sample))) {
+        paintClayPatch(blocks, terrain, sampleTerrain, coordX, coordZ, localX, localZ)
+      }
+    }
+  }
+
+  for (let localZ = 1; localZ < CHUNK_SIZE - 1; localZ += 1) {
+    for (let localX = 1; localX < CHUNK_SIZE - 1; localX += 1) {
       const index = getHeightIndex(localX, localZ)
       const biome = biomes[index]
+      const sample = terrain[index]
       const surfaceY = heights[index]
       const worldX = coordX * CHUNK_SIZE + localX
       const worldZ = coordZ * CHUNK_SIZE + localZ
@@ -281,23 +609,31 @@ const generateChunk = (coordX: number, coordZ: number): ChunkWorkerResponse => {
         continue
       }
 
-      if (surfaceBlock === blockCodes.ground && biome === 'forest' && random() > 0.945) {
-        addTree(blocks, localX, surfaceY + 1, localZ, worldX, worldZ, random)
-      } else if (surfaceBlock === blockCodes.ground && biome === 'plains' && random() > 0.988) {
-        addTree(blocks, localX, surfaceY + 1, localZ, worldX, worldZ, random)
-      } else if (surfaceBlock === blockCodes.ground && (biome === 'forest' || biome === 'plains') && random() > 0.91) {
+      if (surfaceBlock === blockCodes.ground && canPlaceTree(sampleTerrain, sample, biome, worldX, worldZ)) {
+        addTree(
+          blocks,
+          localX,
+          surfaceY + 1,
+          localZ,
+          worldX,
+          worldZ,
+          createSeededRandom(hashString(`${seed}:tree:${worldX}:${worldZ}`)),
+        )
+      } else if (
+        surfaceBlock === blockCodes.ground &&
+        shouldPlaceFlower(sample, biome, worldX, worldZ)
+      ) {
         addFlower(blocks, localX, surfaceY + 1, localZ)
       }
 
       if (surfaceY > SEA_LEVEL + 1) {
-        if ((biome === 'forest' || biome === 'plains') && random() > 0.982) {
+        if ((biome === 'forest' || biome === 'plains') && chunkRandom() > 0.984) {
           spawns.push({ x: worldX + 0.5, y: surfaceY + 1, z: worldZ + 0.5, entityId: 'chicken' })
         }
 
-        // Spiders: much rarer, only some biomes, randomized per-chunk
         const spiderBaseChance =
-          biome === 'mountains' ? 0.997 : biome === 'forest' ? 0.995 : biome === 'plains' ? 0.997 : 1
-        if (biome !== 'beach' && biome !== 'lake' && random() > spiderBaseChance) {
+          biome === 'mountains' ? 0.998 : biome === 'forest' ? 0.996 : biome === 'plains' ? 0.998 : 1
+        if (biome !== 'beach' && biome !== 'lake' && chunkRandom() > spiderBaseChance) {
           spawns.push({ x: worldX + 0.5, y: surfaceY + 1, z: worldZ + 0.5, entityId: 'spider' })
         }
       }
@@ -307,42 +643,42 @@ const generateChunk = (coordX: number, coordZ: number): ChunkWorkerResponse => {
   for (let vein = 0; vein < 10; vein += 1) {
     carveOre(
       blocks,
-      Math.floor(random() * CHUNK_SIZE),
-      6 + Math.floor(random() * 22),
-      Math.floor(random() * CHUNK_SIZE),
+      Math.floor(chunkRandom() * CHUNK_SIZE),
+      6 + Math.floor(chunkRandom() * 22),
+      Math.floor(chunkRandom() * CHUNK_SIZE),
       'coal_ore',
-      1 + Math.floor(random() * 2),
+      1 + Math.floor(chunkRandom() * 2),
     )
   }
 
   for (let vein = 0; vein < 6; vein += 1) {
     carveOre(
       blocks,
-      Math.floor(random() * CHUNK_SIZE),
-      5 + Math.floor(random() * 18),
-      Math.floor(random() * CHUNK_SIZE),
+      Math.floor(chunkRandom() * CHUNK_SIZE),
+      5 + Math.floor(chunkRandom() * 18),
+      Math.floor(chunkRandom() * CHUNK_SIZE),
       'iron_ore',
       1,
     )
   }
 
-  if (random() > 0.55) {
+  if (chunkRandom() > 0.55) {
     carveOre(
       blocks,
-      Math.floor(random() * CHUNK_SIZE),
-      4 + Math.floor(random() * 14),
-      Math.floor(random() * CHUNK_SIZE),
+      Math.floor(chunkRandom() * CHUNK_SIZE),
+      4 + Math.floor(chunkRandom() * 14),
+      Math.floor(chunkRandom() * CHUNK_SIZE),
       'glowing_ore',
       1,
     )
   }
 
-  if (random() > 0.72) {
+  if (chunkRandom() > 0.72) {
     carveOre(
       blocks,
-      Math.floor(random() * CHUNK_SIZE),
-      3 + Math.floor(random() * 10),
-      Math.floor(random() * CHUNK_SIZE),
+      Math.floor(chunkRandom() * CHUNK_SIZE),
+      3 + Math.floor(chunkRandom() * 10),
+      Math.floor(chunkRandom() * CHUNK_SIZE),
       'diamond_ore',
       1,
     )

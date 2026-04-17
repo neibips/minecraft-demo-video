@@ -191,8 +191,11 @@ const createGeneratedGodzillaTexture = (): string => {
 
 const createTextureMaterial = (scene: Scene, name: string, textureUrl: string): StandardMaterial => {
   const material = new StandardMaterial(name, scene)
-  const texture = new Texture(textureUrl, scene, false, false, Texture.NEAREST_SAMPLINGMODE)
+  const texture = new Texture(textureUrl, scene, true, false, Texture.NEAREST_SAMPLINGMODE)
   texture.hasAlpha = true
+  texture.updateSamplingMode(Texture.NEAREST_SAMPLINGMODE)
+  texture.wrapU = Texture.CLAMP_ADDRESSMODE
+  texture.wrapV = Texture.CLAMP_ADDRESSMODE
   material.diffuseTexture = texture
   material.emissiveColor = new Color3(0.6, 0.6, 0.6)
   material.specularColor = Color3.Black()
@@ -200,7 +203,6 @@ const createTextureMaterial = (scene: Scene, name: string, textureUrl: string): 
   material.useAlphaFromDiffuseTexture = true
   material.transparencyMode = Material.MATERIAL_ALPHATEST
   material.alphaCutOff = 0.5
-  material.needDepthPrePass = true
   return material
 }
 

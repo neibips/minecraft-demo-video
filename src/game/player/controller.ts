@@ -1,14 +1,12 @@
 import {
   Color3,
-  Material,
   MeshBuilder,
   StandardMaterial,
-  Texture,
   TransformNode,
   UniversalCamera,
   Vector3,
 } from '@babylonjs/core'
-import type { Scene } from '@babylonjs/core'
+import type { Mesh, Scene } from '@babylonjs/core'
 import {
   CROUCH_EYE_HEIGHT,
   CROUCH_HEIGHT,
@@ -23,9 +21,53 @@ import {
   SWIM_SPEED,
   WALK_SPEED,
 } from '../config'
-import type { PlayerSave } from '../types'
+import {
+  buildExtrudedItemMesh,
+  buildHeldBlockMesh,
+  createHeldBlockMaterial,
+  createHeldItemMaterial,
+} from '../render/itemMesh'
+import type { BlockAtlas, BlockDefinition, ItemDefinition, PlayerSave } from '../types'
 import { clamp } from '../utils/math'
 import { WorldManager } from '../world/worldManager'
+
+type HeldKind = 'block' | 'tool' | 'sword' | 'gun' | 'item'
+
+interface HeldTransform {
+  position: Vector3
+  rotation: Vector3
+  scale: number
+}
+
+const NON_BLOCK_HELD_Y_OFFSET = 0.1
+
+const HELD_PRESETS: Record<HeldKind, HeldTransform> = {
+  block: {
+    position: new Vector3(0.06, 0.06, 0.22),
+    rotation: new Vector3(-0.35, 0.55, 0.05),
+    scale: 0.36,
+  },
+  tool: {
+    position: new Vector3(0.01, 0.14, 0.2),
+    rotation: new Vector3(-0.45, -0.35, 0.95),
+    scale: 0.7,
+  },
+  sword: {
+    position: new Vector3(0.08, -0.04 + NON_BLOCK_HELD_Y_OFFSET, 0.22),
+    rotation: new Vector3(-0.4, -0.3, 0.9),
+    scale: 0.7,
+  },
+  gun: {
+    position: new Vector3(0.04, -0.03 + NON_BLOCK_HELD_Y_OFFSET, 0.28),
+    rotation: new Vector3(-0.05, -0.12, 0.1),
+    scale: 0.62,
+  },
+  item: {
+    position: new Vector3(0.06, 0.08 + NON_BLOCK_HELD_Y_OFFSET, 0.22),
+    rotation: new Vector3(-0.25, 0.35, 0.25),
+    scale: 0.5,
+  },
+}
 
 interface PlayerCallbacks {
   onToggleInventory: () => void
@@ -47,11 +89,16 @@ export class PlayerController {
   private readonly callbacks: PlayerCallbacks
   private readonly keys = new Set<string>()
   private readonly handRoot: TransformNode
+  private readonly heldMount: TransformNode
   private readonly armMesh
-  private readonly heldBlockMesh
-  private readonly heldItemMesh
-  private readonly itemMaterials = new Map<string, StandardMaterial>()
   private readonly armMaterial: StandardMaterial
+  private readonly heldMaterials = new Map<string, StandardMaterial>()
+  private readonly heldMeshes = new Map<string, Mesh>()
+  private heldVisibleMesh: Mesh | null = null
+  private currentHeldKey: string | null = null
+  private atlas: BlockAtlas | null = null
+  private blockLookup: ((itemId: string) => BlockDefinition | undefined) | null = null
+  private itemLookup: ((itemId: string) => ItemDefinition | undefined) | null = null
   private uiCapturingInput = false
   private primaryDown = false
   private primaryPressed = false
@@ -83,17 +130,14 @@ export class PlayerController {
       { width: 0.18, height: 0.5, depth: 0.18 },
       scene,
     )
-    this.heldBlockMesh = MeshBuilder.CreateBox('player-held-block', { size: 0.34 }, scene)
-    this.heldItemMesh = MeshBuilder.CreatePlane(
-      'player-held-item',
-      { size: 0.42, sideOrientation: 2 },
-      scene,
-    )
     this.armMaterial = new StandardMaterial('player-arm-material', scene)
     this.handRoot = new TransformNode('hand-root', scene)
     this.handRoot.parent = this.camera
     this.handRoot.position.set(0.42, -0.44, 0.82)
     this.handRoot.rotation.set(0.18, -0.22, 0)
+
+    this.heldMount = new TransformNode('held-mount', scene)
+    this.heldMount.parent = this.handRoot
 
     this.armMaterial.diffuseColor = new Color3(0.9, 0.75, 0.62)
     this.armMaterial.emissiveColor = new Color3(0.3, 0.22, 0.18)
@@ -103,19 +147,17 @@ export class PlayerController {
     this.armMesh.position.set(-0.08, -0.05, 0.06)
     this.armMesh.rotation.set(0.2, 0.2, 0.2)
 
-    this.heldBlockMesh.parent = this.handRoot
-    this.heldBlockMesh.position.set(0.05, 0.08, 0.18)
-    this.heldBlockMesh.rotation.set(-0.35, 0.55, 0.05)
-    this.heldBlockMesh.isPickable = false
-    this.heldBlockMesh.isVisible = false
-
-    this.heldItemMesh.parent = this.handRoot
-    this.heldItemMesh.position.set(0.04, 0.02, 0.22)
-    this.heldItemMesh.rotation.set(-0.25, 0.45, 0.15)
-    this.heldItemMesh.isPickable = false
-    this.heldItemMesh.isVisible = false
-
     this.registerEvents()
+  }
+
+  setResources(
+    atlas: BlockAtlas,
+    blockLookup: (itemId: string) => BlockDefinition | undefined,
+    itemLookup: (itemId: string) => ItemDefinition | undefined,
+  ): void {
+    this.atlas = atlas
+    this.blockLookup = blockLookup
+    this.itemLookup = itemLookup
   }
 
   dispose(): void {
@@ -128,13 +170,17 @@ export class PlayerController {
     this.canvas.removeEventListener('contextmenu', this.handleContextMenu)
     this.camera.dispose()
     this.armMesh.dispose()
-    this.heldBlockMesh.dispose()
-    this.heldItemMesh.dispose()
-    this.handRoot.dispose()
-    this.armMaterial.dispose()
-    for (const material of this.itemMaterials.values()) {
+    for (const mesh of this.heldMeshes.values()) {
+      mesh.dispose()
+    }
+    this.heldMeshes.clear()
+    for (const material of this.heldMaterials.values()) {
       material.dispose()
     }
+    this.heldMaterials.clear()
+    this.heldMount.dispose()
+    this.handRoot.dispose()
+    this.armMaterial.dispose()
   }
 
   private registerEvents(): void {
@@ -253,41 +299,127 @@ export class PlayerController {
     return direction.normalize()
   }
 
-  setHeldTexture(textureUrl: string | null, isBlock = false): void {
-    if (!textureUrl) {
-      this.heldBlockMesh.isVisible = false
-      this.heldItemMesh.isVisible = false
+  setHeldItem(itemId: string | null): void {
+    if (!itemId) {
+      this.currentHeldKey = null
+      this.showHeldMesh(null, HELD_PRESETS.item)
       return
     }
-    const material = this.getOrCreateHeldMaterial(textureUrl)
-    if (isBlock) {
-      this.heldBlockMesh.material = material
-      this.heldBlockMesh.isVisible = true
-      this.heldItemMesh.isVisible = false
-    } else {
-      this.heldItemMesh.material = material
-      this.heldItemMesh.isVisible = true
-      this.heldBlockMesh.isVisible = false
+    const item = this.itemLookup?.(itemId) ?? null
+    if (!item || !item.texture) {
+      this.currentHeldKey = null
+      this.showHeldMesh(null, HELD_PRESETS.item)
+      return
     }
+
+    const block = item.placeableBlockId ? this.blockLookup?.(item.placeableBlockId) : undefined
+    const kind = this.resolveHeldKind(item, block)
+    const cacheKey = kind === 'block' ? `block:${item.placeableBlockId ?? item.id}` : `item:${item.id}`
+    if (cacheKey === this.currentHeldKey && this.heldVisibleMesh) {
+      return
+    }
+    this.currentHeldKey = cacheKey
+
+    const preset = HELD_PRESETS[kind]
+    const cached = this.heldMeshes.get(cacheKey)
+    if (cached) {
+      this.showHeldMesh(cached, preset)
+      return
+    }
+
+    if (kind === 'block' && block && this.atlas) {
+      const mesh = buildHeldBlockMesh(this.scene, block, this.atlas, `held-block-${block.id}`)
+      mesh.material = this.getOrCreateBlockMaterial()
+      mesh.parent = this.heldMount
+      mesh.isPickable = false
+      mesh.isVisible = false
+      this.heldMeshes.set(cacheKey, mesh)
+      this.showHeldMesh(mesh, preset)
+      return
+    }
+
+    const placeholder = MeshBuilder.CreatePlane(
+      `held-item-placeholder-${item.id}`,
+      { size: 0.4, sideOrientation: 2 },
+      this.scene,
+    )
+    placeholder.material = this.getOrCreateItemMaterial(item.texture)
+    placeholder.parent = this.heldMount
+    placeholder.isPickable = false
+    placeholder.isVisible = false
+    this.heldMeshes.set(cacheKey, placeholder)
+    this.showHeldMesh(placeholder, preset)
+
+    void buildExtrudedItemMesh(this.scene, item.texture, { name: `held-item-${item.id}` })
+      .then((mesh) => {
+        if (!this.heldMeshes.has(cacheKey)) {
+          mesh.dispose()
+          return
+        }
+        mesh.material = this.getOrCreateItemMaterial(item.texture)
+        mesh.parent = this.heldMount
+        mesh.isPickable = false
+        mesh.isVisible = false
+        this.heldMeshes.get(cacheKey)?.dispose()
+        this.heldMeshes.set(cacheKey, mesh)
+        if (this.currentHeldKey === cacheKey) {
+          this.showHeldMesh(mesh, preset)
+        }
+      })
+      .catch(() => {
+        // Leave the placeholder plane if image load fails.
+      })
   }
 
-  private getOrCreateHeldMaterial(textureUrl: string): StandardMaterial {
-    const existing = this.itemMaterials.get(textureUrl)
+  private showHeldMesh(mesh: Mesh | null, preset: HeldTransform): void {
+    if (this.heldVisibleMesh && this.heldVisibleMesh !== mesh) {
+      this.heldVisibleMesh.isVisible = false
+    }
+    this.heldVisibleMesh = mesh
+    if (!mesh) {
+      return
+    }
+    mesh.position.copyFrom(preset.position)
+    mesh.rotation.copyFrom(preset.rotation)
+    mesh.scaling.setAll(preset.scale)
+    mesh.isVisible = true
+  }
+
+  private resolveHeldKind(item: ItemDefinition, block: BlockDefinition | undefined): HeldKind {
+    if (block && item.placeableBlockId) {
+      return 'block'
+    }
+    if (item.category === 'tool') {
+      return 'tool'
+    }
+    if (item.category === 'weapon') {
+      if (item.id === 'machine_gun') return 'gun'
+      return 'sword'
+    }
+    return 'item'
+  }
+
+  private getOrCreateItemMaterial(textureUrl: string): StandardMaterial {
+    const existing = this.heldMaterials.get(textureUrl)
     if (existing) {
       return existing
     }
-    const material = new StandardMaterial(`held-${textureUrl}`, this.scene)
-    const texture = new Texture(textureUrl, this.scene, false, false, Texture.NEAREST_SAMPLINGMODE)
-    texture.hasAlpha = true
-    material.diffuseTexture = texture
-    material.emissiveColor = new Color3(0.85, 0.85, 0.85)
-    material.specularColor = Color3.Black()
-    material.backFaceCulling = false
-    material.useAlphaFromDiffuseTexture = true
-    material.transparencyMode = Material.MATERIAL_ALPHATEST
-    material.alphaCutOff = 0.5
-    material.needDepthPrePass = true
-    this.itemMaterials.set(textureUrl, material)
+    const material = createHeldItemMaterial(this.scene, `held-item-mat-${textureUrl}`, textureUrl)
+    this.heldMaterials.set(textureUrl, material)
+    return material
+  }
+
+  private getOrCreateBlockMaterial(): StandardMaterial {
+    const key = '__atlas__'
+    const existing = this.heldMaterials.get(key)
+    if (existing) {
+      return existing
+    }
+    if (!this.atlas) {
+      throw new Error('Atlas not set on PlayerController')
+    }
+    const material = createHeldBlockMaterial(this.scene, 'held-block-atlas', this.atlas.imageUrl)
+    this.heldMaterials.set(key, material)
     return material
   }
 

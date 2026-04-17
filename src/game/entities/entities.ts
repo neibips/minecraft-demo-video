@@ -156,8 +156,11 @@ export class EntityManager {
   private getOrCreateItemMaterial(textureUrl: string): StandardMaterial {
     if (!this.itemMaterials.has(textureUrl)) {
       const material = new StandardMaterial(`item-${textureUrl}`, this.scene)
-      const texture = new Texture(textureUrl, this.scene, false, false, Texture.NEAREST_SAMPLINGMODE)
+      const texture = new Texture(textureUrl, this.scene, true, false, Texture.NEAREST_SAMPLINGMODE)
       texture.hasAlpha = true
+      texture.updateSamplingMode(Texture.NEAREST_SAMPLINGMODE)
+      texture.wrapU = Texture.CLAMP_ADDRESSMODE
+      texture.wrapV = Texture.CLAMP_ADDRESSMODE
       material.diffuseTexture = texture
       material.emissiveColor = Color3.White()
       material.specularColor = Color3.Black()
@@ -165,7 +168,6 @@ export class EntityManager {
       material.useAlphaFromDiffuseTexture = true
       material.transparencyMode = Material.MATERIAL_ALPHATEST
       material.alphaCutOff = 0.5
-      material.needDepthPrePass = true
       this.itemMaterials.set(textureUrl, material)
     }
     return this.itemMaterials.get(textureUrl)!
