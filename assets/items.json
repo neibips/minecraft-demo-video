@@ -1,0 +1,132 @@
+{
+  "crafting_table": {
+    "name": "Верстак",
+    "description": "Основной блок для крафта. Открывает сетку 3x3 для создания предметов. Без него нельзя скрафтить ничего сложного.",
+    "category": "block",
+    "stackSize": 64,
+    "texture": "/assets/textures/block/crafting_table_front.png"
+  },
+  "furnace": {
+    "name": "Печь",
+    "description": "Блок для переплавки руд в слитки и приготовления еды. Работает на угле или дереве.",
+    "category": "block",
+    "stackSize": 64,
+    "texture": "/assets/textures/block/furnace_front.png"
+  },
+  "stone": {
+    "name": "Камень",
+    "description": "Базовый строительный блок. Добывается киркой из каменных пород. Используется в крафте печи и верстака.",
+    "category": "block",
+    "stackSize": 64,
+    "texture": "/assets/textures/block/stone.png"
+  },
+  "boards": {
+    "name": "Доски",
+    "description": "Базовый строительный материал. Крафтится из дерева. Используется для создания палок и деревянных инструментов.",
+    "category": "block",
+    "stackSize": 64,
+    "texture": "/assets/textures/block/boards.png"
+  },
+  "stick": {
+    "name": "Палка",
+    "description": "Базовый материал для крафта инструментов и оружия. Крафтится из досок.",
+    "category": "material",
+    "stackSize": 64,
+    "texture": "/assets/textures/item/stick.png"
+  },
+  "iron_ingot": {
+    "name": "Железный слиток",
+    "description": "Металл среднего уровня. Получается переплавкой железной руды в печи или крафтом из 9 железных самородков. Используется для крафта инструментов, оружия и брони.",
+    "category": "material",
+    "stackSize": 64,
+    "texture": "/assets/textures/item/iron_ingot.png"
+  },
+  "iron_nugget": {
+    "name": "Железный самородок",
+    "description": "Ванильный материал. Используется для обратного крафта железного слитка и может собираться в слиток по 9 штук.",
+    "category": "material",
+    "stackSize": 64,
+    "texture": "/assets/textures/item/iron_nugget.png"
+  },
+  "egg": {
+    "name": "Яйцо",
+    "description": "Выпадает с курицы. Можно бросать или использовать в крафте яйца призыва Годзилы.",
+    "category": "material",
+    "stackSize": 16,
+    "texture": "/assets/textures/item/egg.png"
+  },
+  "stone_pickaxe": {
+    "name": "Каменная кирка",
+    "description": "Инструмент для добычи блоков. Крафтится из камня и палок. Позволяет добывать железную руду.",
+    "category": "tool",
+    "stackSize": 1,
+    "durability": 131,
+    "texture": "/assets/textures/item/stone_pickaxe.png"
+  },
+  "stone_sword": {
+    "name": "Каменный меч",
+    "description": "Оружие ближнего боя начального уровня. Крафтится из камня и палки.",
+    "category": "weapon",
+    "stackSize": 1,
+    "durability": 131,
+    "damage": 4,
+    "texture": "/assets/textures/item/stone_sword.png"
+  },
+  "iron_pickaxe": {
+    "name": "Железная кирка",
+    "description": "Инструмент для добычи блоков. Позволяет добывать золотую и алмазную руду. Стандартный крафт из железа и палок.",
+    "category": "tool",
+    "stackSize": 1,
+    "durability": 250,
+    "texture": "/assets/textures/item/iron_pickaxe.png"
+  },
+  "iron_sword": {
+    "name": "Железный меч",
+    "description": "Оружие ближнего боя среднего уровня. Стандартный крафт из железа и палки.",
+    "category": "weapon",
+    "stackSize": 1,
+    "durability": 250,
+    "damage": 6,
+    "texture": "/assets/textures/item/iron_sword.png"
+  },
+  "machine_gun": {
+    "name": "Автомат",
+    "description": "Кастомное огнестрельное оружие. Мощное дальнобойное оружие из железа и палок. Стреляет железными самородками.",
+    "category": "weapon",
+    "stackSize": 1,
+    "durability": 500,
+    "damage": 15,
+    "texture": "/assets/textures/item/machine_gun.png"
+  },
+  "diamond": {
+    "name": "Алмаз",
+    "description": "Редкий драгоценный камень высшего уровня. Добывается из алмазной руды. Используется для создания лучших инструментов, оружия и брони.",
+    "category": "material",
+    "stackSize": 64,
+    "texture": "/assets/textures/item/diamond.png"
+  },
+  "godzilla_spawn_egg": {
+    "name": "Яйцо призыва Годзилы",
+    "description": "Кастомное яйцо призыва. Вызывает босса Годзилу. Крафтится из яйца, обёрнутого железными слитками.",
+    "category": "spawn_egg",
+    "stackSize": 1,
+    "texture": "/assets/textures/item/godzilla_spawn_egg.png"
+  },
+  "wooden_pickaxe": {
+    "name": "Деревянная кирка",
+    "description": "Инструмент начального уровня для добычи блоков. Крафтится из досок и палок. Подходит для добычи камня и угля.",
+    "category": "tool",
+    "stackSize": 1,
+    "durability": 59,
+    "texture": "/assets/textures/item/wooden_pickaxe.png"
+  },
+  "wooden_sword": {
+    "name": "Деревянный меч",
+    "description": "Оружие ближнего боя начального уровня. Крафтится из досок и палки.",
+    "category": "weapon",
+    "stackSize": 1,
+    "durability": 59,
+    "damage": 3,
+    "texture": "/assets/textures/item/wooden_sword.png"
+  }
+}

@@ -1,0 +1,144 @@
+{
+  "crafting_table": {
+    "description": "Верстак — 4 доски в сетке 2x2",
+    "type": "shaped",
+    "pattern": [
+      ["boards", "boards"],
+      ["boards", "boards"]
+    ],
+    "result": { "item": "crafting_table", "count": 1 }
+  },
+  "boards": {
+    "description": "Доски — 1 дерево = 4 доски",
+    "type": "shapeless",
+    "ingredients": ["wood"],
+    "result": { "item": "boards", "count": 4 }
+  },
+  "stick": {
+    "description": "Палки — 2 доски вертикально",
+    "type": "shaped",
+    "pattern": [
+      ["boards"],
+      ["boards"]
+    ],
+    "result": { "item": "stick", "count": 4 }
+  },
+  "furnace": {
+    "description": "Печь — 8 камней с пустой серединой",
+    "type": "shaped",
+    "pattern": [
+      ["stone", "stone", "stone"],
+      ["stone", null, "stone"],
+      ["stone", "stone", "stone"]
+    ],
+    "result": { "item": "furnace", "count": 1 }
+  },
+  "iron_ingot": {
+    "description": "Железный слиток — переплавка железной руды в печи",
+    "type": "smelting",
+    "input": "iron_ore",
+    "result": { "item": "iron_ingot", "count": 1 }
+  },
+  "diamond": {
+    "description": "Алмаз — переплавка алмазной руды в печи",
+    "type": "smelting",
+    "input": "diamond_ore",
+    "result": { "item": "diamond", "count": 1 }
+  },
+  "iron_ingot_from_nuggets": {
+    "description": "Железный слиток — крафт из 9 железных самородков",
+    "type": "shaped",
+    "pattern": [
+      ["iron_nugget", "iron_nugget", "iron_nugget"],
+      ["iron_nugget", "iron_nugget", "iron_nugget"],
+      ["iron_nugget", "iron_nugget", "iron_nugget"]
+    ],
+    "result": { "item": "iron_ingot", "count": 1 }
+  },
+  "iron_nugget": {
+    "description": "Железные самородки — разбор 1 железного слитка на 9 самородков",
+    "type": "shapeless",
+    "ingredients": ["iron_ingot"],
+    "result": { "item": "iron_nugget", "count": 9 }
+  },
+  "stone_pickaxe": {
+    "description": "Каменная кирка — 3 камня сверху, 2 палки вниз по центру",
+    "type": "shaped",
+    "pattern": [
+      ["stone", "stone", "stone"],
+      [null, "stick", null],
+      [null, "stick", null]
+    ],
+    "result": { "item": "stone_pickaxe", "count": 1 }
+  },
+  "wooden_pickaxe": {
+    "description": "Деревянная кирка — 3 доски сверху, 2 палки вниз по центру",
+    "type": "shaped",
+    "pattern": [
+      ["boards", "boards", "boards"],
+      [null, "stick", null],
+      [null, "stick", null]
+    ],
+    "result": { "item": "wooden_pickaxe", "count": 1 }
+  },
+  "stone_sword": {
+    "description": "Каменный меч — 2 камня по центру сверху, палка снизу по центру",
+    "type": "shaped",
+    "pattern": [
+      [null, "stone", null],
+      [null, "stone", null],
+      [null, "stick", null]
+    ],
+    "result": { "item": "stone_sword", "count": 1 }
+  },
+  "wooden_sword": {
+    "description": "Деревянный меч — 2 доски по центру сверху, палка снизу по центру",
+    "type": "shaped",
+    "pattern": [
+      [null, "boards", null],
+      [null, "boards", null],
+      [null, "stick", null]
+    ],
+    "result": { "item": "wooden_sword", "count": 1 }
+  },
+  "iron_pickaxe": {
+    "description": "Кирка — 3 железных слитка сверху, 2 палки вниз по центру",
+    "type": "shaped",
+    "pattern": [
+      ["iron_ingot", "iron_ingot", "iron_ingot"],
+      [null, "stick", null],
+      [null, "stick", null]
+    ],
+    "result": { "item": "iron_pickaxe", "count": 1 }
+  },
+  "iron_sword": {
+    "description": "Меч — 2 железных слитка по центру сверху, палка снизу по центру",
+    "type": "shaped",
+    "pattern": [
+      [null, "iron_ingot", null],
+      [null, "iron_ingot", null],
+      [null, "stick", null]
+    ],
+    "result": { "item": "iron_sword", "count": 1 }
+  },
+  "machine_gun": {
+    "description": "Автомат — 3 железа вертикально по центру, 2 палки по диагонали как рукоять и приклад",
+    "type": "shaped",
+    "pattern": [
+      [null, "iron_ingot", null],
+      ["stick", "iron_ingot", null],
+      [null, "iron_ingot", "stick"]
+    ],
+    "result": { "item": "machine_gun", "count": 1 }
+  },
+  "godzilla_spawn_egg": {
+    "description": "Яйцо призыва Годзилы — яйцо в центре, обёрнутое 8 железными слитками",
+    "type": "shaped",
+    "pattern": [
+      ["iron_ingot", "iron_ingot", "iron_ingot"],
+      ["iron_ingot", "egg", "iron_ingot"],
+      ["iron_ingot", "iron_ingot", "iron_ingot"]
+    ],
+    "result": { "item": "godzilla_spawn_egg", "count": 1 }
+  }
+}

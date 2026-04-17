@@ -1,0 +1,14 @@
+ground
+stone
+wood
+boards
+leaves
+clay
+brick
+glass
+sand
+iron_ore
+coal_ore
+diamond_ore
+glowing_ore
+flower

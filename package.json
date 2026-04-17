@@ -1,0 +1,20 @@
+{
+  "name": "minecraft2-gpt",
+  "version": "1.0.0",
+  "description": "Minecraft 2 browser voxel sandbox built with Vite, TypeScript and Babylon.js",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@babylonjs/core": "^9.2.1",
+    "vite": "^8.0.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.3"
+  },
+  "private": true
+}
