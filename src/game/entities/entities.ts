@@ -183,7 +183,7 @@ export class EntityManager {
     mesh.material = this.getOrCreateItemMaterial(item.texture)
     mesh.position.copyFrom(position)
     mesh.isPickable = false
-    mesh.renderingGroupId = 1
+    mesh.renderingGroupId = 0
     this.itemDrops.set(id, {
       state: {
         id,

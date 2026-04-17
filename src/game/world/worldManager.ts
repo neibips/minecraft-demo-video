@@ -91,7 +91,7 @@ export class WorldManager {
 
   private createBlockMaterial(name: string, textureUrl: string, useAlpha: boolean): StandardMaterial {
     const material = new StandardMaterial(name, this.scene)
-    const texture = new Texture(textureUrl, this.scene, false, false, Texture.NEAREST_SAMPLINGMODE)
+    const texture = new Texture(textureUrl, this.scene, true, false, Texture.NEAREST_SAMPLINGMODE)
     texture.hasAlpha = useAlpha
     texture.updateSamplingMode(Texture.NEAREST_SAMPLINGMODE)
     texture.wrapU = Texture.CLAMP_ADDRESSMODE
@@ -103,10 +103,8 @@ export class WorldManager {
 
     if (useAlpha) {
       material.useAlphaFromDiffuseTexture = true
-      material.alphaCutOff = 0.45
+      material.alphaCutOff = 0.5
       material.transparencyMode = Material.MATERIAL_ALPHATEST
-      material.forceDepthWrite = true
-      material.needDepthPrePass = true
     }
 
     return material
@@ -116,7 +114,7 @@ export class WorldManager {
     const material = new StandardMaterial('chunk-water-material', this.scene)
     const waterTextureUrl = this.registries.blocks.get('water')?.textures.all
     if (waterTextureUrl) {
-      const texture = new Texture(waterTextureUrl, this.scene, false, false, Texture.NEAREST_SAMPLINGMODE)
+      const texture = new Texture(waterTextureUrl, this.scene, true, false, Texture.NEAREST_SAMPLINGMODE)
       texture.hasAlpha = true
       texture.updateSamplingMode(Texture.NEAREST_SAMPLINGMODE)
       texture.wrapU = Texture.CLAMP_ADDRESSMODE
@@ -133,7 +131,8 @@ export class WorldManager {
     material.emissiveColor = new Color3(0.05, 0.1, 0.15)
     material.specularColor = new Color3(0.25, 0.3, 0.36)
     material.alpha = 0.78
-    material.backFaceCulling = true
+    material.backFaceCulling = false
+    material.separateCullingPass = true
     material.transparencyMode = Material.MATERIAL_ALPHABLEND
     material.needDepthPrePass = true
     return material

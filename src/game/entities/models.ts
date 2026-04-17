@@ -233,7 +233,7 @@ const buildVisualFromModel = (
     mesh.parent = pivot
     mesh.material = material
     mesh.isPickable = false
-    mesh.renderingGroupId = 1
+    mesh.renderingGroupId = 0
     mesh.position.set(
       (part.offset.x + part.size.x / 2) / 16,
       -(part.offset.y + part.size.y / 2) / 16,
@@ -309,7 +309,7 @@ const buildSpiderVisual = (scene: Scene, textureUrl: string): EntityVisual => {
     mesh.parent = pivot
     mesh.material = material
     mesh.isPickable = false
-    mesh.renderingGroupId = 1
+    mesh.renderingGroupId = 0
     mesh.position.set(
       (offsetX + sizeX / 2) * S,
       -(offsetY + sizeY / 2) * S,
@@ -371,7 +371,7 @@ export const createEntityVisual = (
       )
       mesh.parent = pivot
       mesh.material = material
-      mesh.renderingGroupId = 1
+      mesh.renderingGroupId = 0
       pivots.set(part.name, pivot)
     }
     return { root, pivots }
