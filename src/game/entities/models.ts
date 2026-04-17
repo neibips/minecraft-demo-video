@@ -166,6 +166,37 @@ const createCuboidFaceUvs = (model: ParsedEntityModel, part: ParsedEntityModel['
   ]
 }
 
+const createSpiderCuboidFaceUvs = (
+  textureX: number,
+  textureY: number,
+  width: number,
+  height: number,
+  depth: number,
+  mirror: boolean,
+): Vector4[] => {
+  const front = toFaceUv(textureX + depth, textureY + depth, width, height, 64, 32)
+  const back = toFaceUv(textureX + depth + width + depth, textureY + depth, width, height, 64, 32)
+  const right = toFaceUv(textureX + depth + width, textureY + depth, depth, height, 64, 32)
+  const left = toFaceUv(textureX, textureY + depth, depth, height, 64, 32)
+  const top = toFaceUv(textureX + depth, textureY, width, depth, 64, 32)
+  const bottom = toFaceUv(textureX + depth + width, textureY, width, depth, 64, 32)
+
+  if (!mirror) {
+    // Babylon boxes expose faces in the order +Z, -Z, +X, -X, +Y, -Y.
+    // Minecraft entity cuboids define front as -Z and right as -X.
+    return [back, front, left, right, top, bottom]
+  }
+
+  return [
+    flipFaceUvX(back),
+    flipFaceUvX(front),
+    flipFaceUvX(right),
+    flipFaceUvX(left),
+    flipFaceUvX(top),
+    flipFaceUvX(bottom),
+  ]
+}
+
 const createGeneratedGodzillaTexture = (): string => {
   const canvas = document.createElement('canvas')
   canvas.width = 64
@@ -248,11 +279,11 @@ const buildVisualFromModel = (
 }
 
 const buildSpiderVisual = (scene: Scene, textureUrl: string): EntityVisual => {
-  const TW = 64
-  const TH = 32
-  const GY = 26
   const S = 1 / 16
   const root = new TransformNode('spider', scene)
+  const modelRoot = new TransformNode('spider-model', scene)
+  modelRoot.parent = root
+  modelRoot.rotation.y = Math.PI
   const material = createTextureMaterial(scene, 'spider-material', textureUrl)
   const pivots = new Map<string, TransformNode>()
 
@@ -265,18 +296,7 @@ const buildSpiderVisual = (scene: Scene, textureUrl: string): EntityVisual => {
     textureY: number,
     mirror: boolean,
   ) => {
-    const faceUV = createCuboidFaceUvs(
-      { width: TW, height: TH, parts: [] },
-      {
-        name,
-        size: { x: width, y: height, z: depth },
-        offset: { x: 0, y: 0, z: 0 },
-        pivot: { x: 0, y: 0, z: 0 },
-        rotation: { x: 0, y: 0, z: 0 },
-        textureOffset: { x: textureX, y: textureY },
-        mirror,
-      },
-    )
+    const faceUV = createSpiderCuboidFaceUvs(textureX, textureY, width, height, depth, mirror)
     return MeshBuilder.CreateBox(
       `spider-${name}-mesh`,
       { width: width * S, height: height * S, depth: depth * S, faceUV },
@@ -303,8 +323,8 @@ const buildSpiderVisual = (scene: Scene, textureUrl: string): EntityVisual => {
     mirror = false,
   ) => {
     const pivot = new TransformNode(`spider-${name}`, scene)
-    pivot.parent = root
-    pivot.position.set(pivotX * S, (GY - pivotY) * S, pivotZ * S)
+    pivot.parent = modelRoot
+    pivot.position.set(pivotX * S, (24 - pivotY) * S, pivotZ * S)
     pivot.rotation.set(rotationX, rotationY, rotationZ)
 
     const mesh = buildBox(name, sizeX, sizeY, sizeZ, textureX, textureY, mirror)
@@ -328,14 +348,14 @@ const buildSpiderVisual = (scene: Scene, textureUrl: string): EntityVisual => {
   part('body0', 0, 0, -3, -3, -3, 6, 6, 6, 0, 15, 0)
   part('body1', 0, 12, -5, -4, -6, 10, 8, 12, 0, 15, 9)
 
-  part('right_hind_leg', 18, 0, -15, -1, -1, 16, 2, 2, -4, 15, 2, 0, PI4, -PI4)
-  part('left_hind_leg', 18, 0, -1, -1, -1, 16, 2, 2, 4, 15, 2, 0, -PI4, PI4, true)
-  part('right_middle_hind_leg', 18, 0, -15, -1, -1, 16, 2, 2, -4, 15, 1, 0, PI8, -A)
-  part('left_middle_hind_leg', 18, 0, -1, -1, -1, 16, 2, 2, 4, 15, 1, 0, -PI8, A, true)
-  part('right_middle_front_leg', 18, 0, -15, -1, -1, 16, 2, 2, -4, 15, 0, 0, -PI8, -A)
-  part('left_middle_front_leg', 18, 0, -1, -1, -1, 16, 2, 2, 4, 15, 0, 0, PI8, A, true)
-  part('right_front_leg', 18, 0, -15, -1, -1, 16, 2, 2, -4, 15, -1, 0, -PI4, -PI4)
-  part('left_front_leg', 18, 0, -1, -1, -1, 16, 2, 2, 4, 15, -1, 0, PI4, PI4, true)
+  part('right_hind_leg', 18, 0, -15, -1, -1, 16, 2, 2, -4, 15, 2, 0, PI4, PI4)
+  part('left_hind_leg', 18, 0, -1, -1, -1, 16, 2, 2, 4, 15, 2, 0, -PI4, -PI4, true)
+  part('right_middle_hind_leg', 18, 0, -15, -1, -1, 16, 2, 2, -4, 15, 1, 0, PI8, A)
+  part('left_middle_hind_leg', 18, 0, -1, -1, -1, 16, 2, 2, 4, 15, 1, 0, -PI8, -A, true)
+  part('right_middle_front_leg', 18, 0, -15, -1, -1, 16, 2, 2, -4, 15, 0, 0, -PI8, A)
+  part('left_middle_front_leg', 18, 0, -1, -1, -1, 16, 2, 2, 4, 15, 0, 0, PI8, -A, true)
+  part('right_front_leg', 18, 0, -15, -1, -1, 16, 2, 2, -4, 15, -1, 0, -PI4, PI4)
+  part('left_front_leg', 18, 0, -1, -1, -1, 16, 2, 2, 4, 15, -1, 0, PI4, -PI4, true)
 
   return { root, pivots }
 }

@@ -255,12 +255,20 @@ export interface MobState {
   yaw: number
   state: 'idle' | 'wander' | 'chase' | 'attack'
   wanderTimer: number
+  stateTimer?: number
   actionTimer: number
   hurtTimer: number
   eggTimer?: number
   attackCooldown?: number
-  attackAnim?: number
+  attackTimer?: number
+  attackHitDone?: boolean
   wanderSpeed?: number
+  grounded?: boolean
+  hostile?: boolean
+  navTarget?: { x: number; y: number; z: number }
+  path?: Array<{ x: number; y: number; z: number }>
+  pathIndex?: number
+  repathTimer?: number
 }
 
 export interface UiTooltipState {

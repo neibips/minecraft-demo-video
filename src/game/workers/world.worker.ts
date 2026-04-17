@@ -467,7 +467,7 @@ const shouldCarveCave = (worldX: number, y: number, worldZ: number, surfaceY: nu
     0.52,
   )
   const spaghetti = Math.min(tunnelA, Math.abs(tunnelB + tunnelWarp * 0.35))
-  const tunnelThreshold = 0.05 + depthMask * 0.028 + caveDensity * 0.018
+  const tunnelThreshold = 0.034 + depthMask * 0.018 + caveDensity * 0.01
 
   const chamberNoise = noise.fbm3d(worldX * 0.021, y * 0.025, worldZ * 0.021, 4, 2.02, 0.5)
   const chamberShape = noise.ridged3d(
@@ -478,16 +478,16 @@ const shouldCarveCave = (worldX: number, y: number, worldZ: number, surfaceY: nu
     2.06,
     0.5,
   )
-  const chamberThreshold = 0.54 - depthMask * 0.08
-  const chamber = chamberNoise > chamberThreshold && chamberShape > 0.36 + (1 - caveDensity) * 0.08
+  const chamberThreshold = 0.61 - depthMask * 0.04
+  const chamber = chamberNoise > chamberThreshold && chamberShape > 0.46 + (1 - caveDensity) * 0.06
 
   const nearSurface = burialDepth <= 7 && y > SEA_LEVEL - 6
   const entranceMask = noise.ridged2d(worldX * 0.026 + 180, worldZ * 0.026 - 320, 3, 2.08, 0.52)
   const entrance =
     nearSurface &&
-    caveDensity > 0.46 &&
-    entranceMask > 0.66 &&
-    spaghetti < tunnelThreshold + 0.024
+    caveDensity > 0.5 &&
+    entranceMask > 0.72 &&
+    spaghetti < tunnelThreshold + 0.014
 
   if (burialDepth < 3 && !entrance) {
     return false
