@@ -936,6 +936,9 @@ export class Minecraft2Game {
       this.player.update(deltaSeconds, this.mode === 'playing')
       this.entityManager?.update(deltaSeconds, this.worldTime, this.player.position)
       this.tickFurnaces(deltaSeconds)
+      if (this.worldManager) {
+        await this.worldManager.tickFluids(50)
+      }
       await this.handleWorldInput(deltaSeconds)
 
       if (this.player.health <= 0) {

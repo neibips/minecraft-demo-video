@@ -53,6 +53,7 @@ export class WorldManager {
   private spawnCallback: SpawnCallback | null = null
   private renderDistance = DEFAULT_RENDER_DISTANCE
   private currentSeed = ''
+  private fluidUpdateQueue = new Set<string>()
 
   constructor(
     scene: Scene,
@@ -399,6 +400,11 @@ export class WorldManager {
     return code ? this.registries.blocksByCode.get(code) : undefined
   }
 
+  queueFluidUpdate(worldX: number, y: number, worldZ: number): void {
+    const key = `${worldX}:${y}:${worldZ}`
+    this.fluidUpdateQueue.add(key)
+  }
+
   async setBlock(worldX: number, y: number, worldZ: number, blockCode: number): Promise<boolean> {
     const coord = getChunkCoord(worldX, worldZ)
     const chunk = await this.ensureChunkLoaded(coord)
@@ -414,6 +420,18 @@ export class WorldManager {
       delete chunk.blockEntities[packBlockEntityKey(localX, y, localZ)]
     }
     this.scheduleNeighborRebuilds(worldX, worldZ)
+    
+    // Queue fluid updates for this block and neighbors
+    this.queueFluidUpdate(worldX, y, worldZ)
+    const dirs = [
+      [1, 0, 0], [-1, 0, 0],
+      [0, 1, 0], [0, -1, 0],
+      [0, 0, 1], [0, 0, -1]
+    ]
+    for (const [dx, dy, dz] of dirs) {
+      this.queueFluidUpdate(worldX + dx, y + dy, worldZ + dz)
+    }
+
     await this.saveChunk(coord)
     return true
   }
@@ -497,7 +515,7 @@ export class WorldManager {
     return chunk.heights[getHeightIndex(getLocalCoord(worldX), getLocalCoord(worldZ))]
   }
 
-  raycast(origin: Vector3, direction: Vector3, maxDistance = INTERACTION_RANGE): RaycastHit | null {
+  raycast(origin: Vector3, direction: Vector3, maxDistance = INTERACTION_RANGE, ignoreFluids = true): RaycastHit | null {
     let x = Math.floor(origin.x)
     let y = Math.floor(origin.y)
     let z = Math.floor(origin.z)
@@ -526,10 +544,13 @@ export class WorldManager {
     for (;;) {
       const blockCode = this.getBlock(x, y, z)
       if (blockCode) {
-        return {
-          blockPosition: { x, y, z },
-          adjacentPosition: previous,
-          blockCode,
+        const blockDef = this.registries.blocksByCode.get(blockCode)
+        if (!ignoreFluids || !blockDef?.fluid) {
+          return {
+            blockPosition: { x, y, z },
+            adjacentPosition: previous,
+            blockCode,
+          }
         }
       }
 
@@ -580,5 +601,79 @@ export class WorldManager {
       hit.blockPosition.z + 0.5,
     )
     this.outlineBlock.isVisible = true
+  }
+
+  private calculateExpectedFluidLevel(x: number, y: number, z: number): string | null {
+    const currentCode = this.getBlock(x, y, z)
+    if (currentCode === undefined) return null // Out of bounds
+    const currentDef = this.registries.blocksByCode.get(currentCode)
+    
+    if (currentDef && currentDef.solid) {
+      return currentDef.id
+    }
+    if (currentDef?.id === 'water') {
+      return 'water'
+    }
+
+    const aboveCode = this.getBlock(x, y + 1, z)
+    const aboveDef = aboveCode ? this.registries.blocksByCode.get(aboveCode) : null
+    const falling = aboveDef?.fluid
+
+    let sourceNeighbors = 0
+    let maxFlow = 0
+
+    const neighbors = [
+      { nx: x + 1, nz: z },
+      { nx: x - 1, nz: z },
+      { nx: x, nz: z + 1 },
+      { nx: x, nz: z - 1 },
+    ]
+
+    for (const { nx, nz } of neighbors) {
+      const nCode = this.getBlock(nx, y, nz)
+      const nDef = nCode ? this.registries.blocksByCode.get(nCode) : null
+      if (nDef?.fluid) {
+        if (nDef.id === 'water') {
+          sourceNeighbors++
+        }
+        const belowNCode = this.getBlock(nx, y - 1, nz)
+        const belowNDef = belowNCode ? this.registries.blocksByCode.get(belowNCode) : null
+        const canSpreadSideways = belowNDef?.solid || belowNDef?.id === 'water'
+        
+        if (canSpreadSideways) {
+          maxFlow = Math.max(maxFlow, nDef.fluidLevel ?? 8)
+        }
+      }
+    }
+
+    const belowCode = this.getBlock(x, y - 1, z)
+    const belowDef = belowCode ? this.registries.blocksByCode.get(belowCode) : null
+    const canFormSource = sourceNeighbors >= 2 && (belowDef?.solid || belowDef?.id === 'water')
+
+    if (canFormSource) return 'water'
+    if (falling) return 'water_7'
+    if (maxFlow > 1) return `water_${maxFlow - 1}`
+    return 'air'
+  }
+
+  async tickFluids(maxUpdates = 50): Promise<void> {
+    const updates = Array.from(this.fluidUpdateQueue).slice(0, maxUpdates)
+    for (const key of updates) {
+      this.fluidUpdateQueue.delete(key)
+      const [x, y, z] = key.split(':').map(Number)
+      
+      const currentCode = this.getBlock(x, y, z)
+      if (currentCode === undefined) continue
+
+      const expectedId = this.calculateExpectedFluidLevel(x, y, z)
+      if (expectedId === null) continue
+
+      const expectedCode = expectedId === 'air' ? 0 : this.registries.blockCodes[expectedId]
+      if (expectedCode === undefined) continue
+
+      if (currentCode !== expectedCode) {
+        await this.setBlock(x, y, z, expectedCode)
+      }
+    }
   }
 }

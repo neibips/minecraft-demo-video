@@ -115,7 +115,7 @@ const inferBlockDefinition = (
       bottom: 'textures/block/furnace_top.png',
     }
     block.breakTime = 0.9
-  } else if (id === 'water') {
+  } else if (id.startsWith('water')) {
     block.category = 'fluid'
     block.textures = { all: 'textures-vanilla/block/water_still.png' }
     block.transparent = true
@@ -123,6 +123,7 @@ const inferBlockDefinition = (
     block.collidable = false
     block.solid = false
     block.fluid = true
+    block.fluidLevel = id === 'water' ? 8 : parseInt(id.replace('water_', ''), 10)
     block.breakTime = 0
   }
 
@@ -225,6 +226,9 @@ export const buildRegistries = (): RegistryBundle => {
     }
   }
   blockIds.add('water')
+  for (let i = 1; i <= 7; i++) {
+    blockIds.add(`water_${i}`)
+  }
   blockIds.add('dirt')
 
   const blocks = new Map<string, BlockDefinition>()

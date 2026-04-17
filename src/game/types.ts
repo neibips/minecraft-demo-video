@@ -27,6 +27,7 @@ export interface BlockDefinition {
   translucent: boolean
   crossPlane: boolean
   fluid: boolean
+  fluidLevel?: number
   breakTime: number
   emitsLight: number
   dropItemId: ItemId

@@ -314,7 +314,7 @@ export const buildChunkMesh = (
           continue
         }
 
-        const fluidTopHeight = block.fluid && !topNeighbor?.fluid ? FLUID_SURFACE_HEIGHT : 1
+        const fluidTopHeight = block.fluid && !topNeighbor?.fluid ? ((block.fluidLevel ?? 8) / 8) * FLUID_SURFACE_HEIGHT : 1
 
         for (let faceIndex = 0; faceIndex < faceNormals.length; faceIndex += 1) {
           const normal = faceNormals[faceIndex]
