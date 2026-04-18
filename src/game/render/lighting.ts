@@ -22,6 +22,7 @@ import { SkyMaterial } from '@babylonjs/materials/sky/skyMaterial'
 const CELESTIAL_DISTANCE = 360
 const SKYBOX_SIZE = 2200
 const SHADOW_MAP_SIZE = 1024
+const SHADOW_DISTANCE_SUN = 60
 const SHADOW_DISTANCE_DAY = 72
 const SHADOW_DISTANCE_NIGHT = 56
 const SUN_DISC_SIZE = 150
@@ -354,16 +355,30 @@ export class LightingManager {
           : this.moonLight
     this.switchShadowLight(shadowLight)
 
-    const shadowDistance = lerpScalar(
-      SHADOW_DISTANCE_NIGHT,
-      SHADOW_DISTANCE_DAY,
-      clamp01(dayFactor + twilightFactor * 0.35),
-    )
-    this.shadowGenerator.shadowMaxZ = shadowDistance
-    this.shadowGenerator.lambda = lerpScalar(0.72, 0.86, lowSunFactor)
-    this.shadowGenerator.bias = lerpScalar(0.0018, 0.004, lowSunFactor)
-    this.shadowGenerator.normalBias = lerpScalar(0.055, 0.09, lowSunFactor)
-    this.shadowGenerator.setDarkness(lerpScalar(0.32, 0.42, nightFactor))
+    if (shadowLight === this.sunLight) {
+      const sunShadowDistance = lerpScalar(
+        SHADOW_DISTANCE_NIGHT,
+        SHADOW_DISTANCE_SUN,
+        clamp01(dayFactor + twilightFactor * 0.2),
+      )
+      this.shadowGenerator.shadowMaxZ = sunShadowDistance
+      this.shadowGenerator.lambda = lerpScalar(0.64, 0.8, lowSunFactor)
+      // Large bias values erase thin voxel casters like trunks and leaf blocks in daylight.
+      this.shadowGenerator.bias = lerpScalar(0.0007, 0.0016, lowSunFactor)
+      this.shadowGenerator.normalBias = lerpScalar(0.01, 0.024, lowSunFactor)
+      this.shadowGenerator.setDarkness(lerpScalar(0.2, 0.28, lowSunFactor))
+    } else {
+      const shadowDistance = lerpScalar(
+        SHADOW_DISTANCE_NIGHT,
+        SHADOW_DISTANCE_DAY,
+        clamp01(dayFactor + twilightFactor * 0.35),
+      )
+      this.shadowGenerator.shadowMaxZ = shadowDistance
+      this.shadowGenerator.lambda = lerpScalar(0.72, 0.86, lowSunFactor)
+      this.shadowGenerator.bias = lerpScalar(0.0018, 0.004, lowSunFactor)
+      this.shadowGenerator.normalBias = lerpScalar(0.055, 0.09, lowSunFactor)
+      this.shadowGenerator.setDarkness(lerpScalar(0.32, 0.42, nightFactor))
+    }
 
     this.sunMaterial.emissiveColor = Color3.Lerp(
       new Color3(1.7, 0.96, 0.54),

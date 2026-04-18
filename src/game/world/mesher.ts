@@ -150,11 +150,11 @@ const pushQuad = (buffers: MeshBuffers, vertices: readonly Vertex[], uvRect: rea
 
   buffers.indices.push(
     startIndex,
+    startIndex + 2,
     startIndex + 1,
-    startIndex + 2,
     startIndex,
-    startIndex + 2,
     startIndex + 3,
+    startIndex + 2,
   )
 
   buffers.uvs.push(...uvRect)
