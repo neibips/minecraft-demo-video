@@ -17,6 +17,7 @@ import type {
   RegistryBundle,
 } from '../types'
 import { WorldManager } from '../world/worldManager'
+import { LightingManager } from '../render/lighting'
 
 interface MobRuntime {
   state: MobState
@@ -107,23 +108,33 @@ export class EntityManager {
   private readonly registries: RegistryBundle
   private readonly world: WorldManager
   private readonly callbacks: EntityCallbacks
+  private readonly lighting: LightingManager
   private readonly mobs = new Map<string, MobRuntime>()
   private readonly itemDrops = new Map<string, ItemDropRuntime>()
   private readonly itemMaterials = new Map<string, StandardMaterial>()
   private nextId = 1
 
-  constructor(scene: Scene, registries: RegistryBundle, world: WorldManager, callbacks: EntityCallbacks) {
+  constructor(
+    scene: Scene,
+    registries: RegistryBundle,
+    world: WorldManager,
+    callbacks: EntityCallbacks,
+    lighting: LightingManager,
+  ) {
     this.scene = scene
     this.registries = registries
     this.world = world
     this.callbacks = callbacks
+    this.lighting = lighting
   }
 
   dispose(): void {
     for (const mob of this.mobs.values()) {
+      this.lighting.removeShadowCasterHierarchy(mob.root)
       mob.root.dispose()
     }
     for (const drop of this.itemDrops.values()) {
+      this.lighting.removeShadowCaster(drop.mesh)
       drop.mesh.dispose()
     }
     for (const material of this.itemMaterials.values()) {
@@ -142,6 +153,7 @@ export class EntityManager {
     const id = `mob-${this.nextId}`
     this.nextId += 1
     visual.root.position.set(x, y, z)
+    this.lighting.addShadowCasterHierarchy(visual.root)
     this.mobs.set(id, {
       state: {
         id,
@@ -194,7 +206,9 @@ export class EntityManager {
       texture.wrapU = Texture.CLAMP_ADDRESSMODE
       texture.wrapV = Texture.CLAMP_ADDRESSMODE
       material.diffuseTexture = texture
-      material.emissiveColor = Color3.White()
+      material.diffuseColor = Color3.White()
+      material.emissiveColor = new Color3(0.15, 0.15, 0.15)
+      material.ambientColor = Color3.White()
       material.specularColor = Color3.Black()
       material.backFaceCulling = false
       material.useAlphaFromDiffuseTexture = true
@@ -218,6 +232,7 @@ export class EntityManager {
     mesh.position.copyFrom(position)
     mesh.isPickable = false
     mesh.renderingGroupId = 0
+    this.lighting.addShadowCaster(mesh)
     this.itemDrops.set(id, {
       state: {
         id,
@@ -275,6 +290,7 @@ export class EntityManager {
     for (const loot of mob.definition.loot) {
       this.spawnItemDrop(loot, 1, position, new Vector3((Math.random() - 0.5) * 1.6, 2, (Math.random() - 0.5) * 1.6))
     }
+    this.lighting.removeShadowCasterHierarchy(mob.root)
     mob.root.dispose()
     this.mobs.delete(mob.state.id)
   }
@@ -288,6 +304,7 @@ export class EntityManager {
     for (const [id, drop] of this.itemDrops.entries()) {
       drop.state.life -= deltaSeconds
       if (drop.state.life <= 0) {
+        this.lighting.removeShadowCaster(drop.mesh)
         drop.mesh.dispose()
         this.itemDrops.delete(id)
         continue
@@ -321,6 +338,7 @@ export class EntityManager {
       if (distance <= ITEM_DROP_PICKUP_RADIUS) {
         const remainder = this.callbacks.giveItem(drop.state.itemId, drop.state.count)
         if (remainder <= 0) {
+          this.lighting.removeShadowCaster(drop.mesh)
           drop.mesh.dispose()
           this.itemDrops.delete(id)
         } else {
@@ -792,6 +810,7 @@ export class EntityManager {
       const verticalDiff = Math.abs(mob.state.position.y + 0.5 - playerPosition.y)
 
       if (distanceXZ > MOB_DESPAWN_DISTANCE && mob.definition.type !== 'boss') {
+        this.lighting.removeShadowCasterHierarchy(mob.root)
         mob.root.dispose()
         this.mobs.delete(id)
         continue

@@ -22,6 +22,7 @@ import { WorldDatabase } from '../storage/database'
 import { getChunkCoord, getChunkKey, getHeightIndex, getLocalCoord, getVoxelIndex, packBlockEntityKey } from '../utils/chunk'
 import { buildChunkMesh } from './mesher'
 import type { WorldWorkerResponse } from './protocol'
+import { LightingManager } from '../render/lighting'
 
 interface LoadedChunk {
   data: ChunkData
@@ -40,6 +41,7 @@ export class WorldManager {
   private readonly scene: Scene
   private readonly registries: RegistryBundle
   private readonly database: WorldDatabase
+  private readonly lighting: LightingManager
   private readonly worker = new Worker(new URL('../workers/world.worker.ts', import.meta.url), {
     type: 'module',
   })
@@ -60,10 +62,12 @@ export class WorldManager {
     registries: RegistryBundle,
     database: WorldDatabase,
     atlasImageUrl: string,
+    lighting: LightingManager,
   ) {
     this.scene = scene
     this.registries = registries
     this.database = database
+    this.lighting = lighting
 
     this.waterMaterial = this.createWaterMaterial()
 
@@ -98,7 +102,9 @@ export class WorldManager {
     texture.wrapU = Texture.CLAMP_ADDRESSMODE
     texture.wrapV = Texture.CLAMP_ADDRESSMODE
     material.diffuseTexture = texture
-    material.emissiveColor = Color3.White()
+    material.diffuseColor = Color3.White()
+    material.emissiveColor = Color3.Black()
+    material.ambientColor = Color3.White()
     material.specularColor = Color3.Black()
     material.backFaceCulling = false
 
@@ -129,7 +135,8 @@ export class WorldManager {
     } else {
       material.diffuseColor = new Color3(0.44, 0.67, 0.9)
     }
-    material.emissiveColor = new Color3(0.05, 0.1, 0.15)
+    material.emissiveColor = new Color3(0.02, 0.05, 0.08)
+    material.ambientColor = Color3.White()
     material.specularColor = new Color3(0.25, 0.3, 0.36)
     material.alpha = 0.78
     material.backFaceCulling = false
@@ -179,9 +186,11 @@ export class WorldManager {
 
   private disposeChunkMeshes(meshes: ChunkMeshHandle): void {
     for (const mesh of meshes.solid) {
+      this.lighting.removeShadowCaster(mesh)
       mesh.dispose()
     }
     for (const mesh of meshes.cutout) {
+      this.lighting.removeShadowCaster(mesh)
       mesh.dispose()
     }
     for (const mesh of meshes.fluid) {
@@ -190,13 +199,22 @@ export class WorldManager {
   }
 
   private buildChunkMeshes(data: ChunkData): ChunkMeshHandle {
-    return buildChunkMesh(
+    const handle = buildChunkMesh(
       this.scene,
       data,
       this.registries,
       this.getChunkMaterials(),
       (worldX, y, worldZ) => this.getBlock(worldX, y, worldZ, data),
     )
+    for (const mesh of handle.solid) {
+      mesh.receiveShadows = true
+      this.lighting.addShadowCaster(mesh)
+    }
+    for (const mesh of handle.cutout) {
+      mesh.receiveShadows = true
+      this.lighting.addShadowCaster(mesh)
+    }
+    return handle
   }
 
   async initialize(seed: string, renderDistance: number, onSpawns: SpawnCallback): Promise<void> {

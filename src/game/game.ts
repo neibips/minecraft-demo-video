@@ -1,14 +1,11 @@
 import {
-  Color3,
-  Color4,
-  DirectionalLight,
   Engine,
-  HemisphericLight,
   Scene,
   UniversalCamera,
   Vector3,
 } from '@babylonjs/core'
 import { buildBlockAtlas } from './render/atlas'
+import { LightingManager } from './render/lighting'
 import { buildRegistries } from './data/registry'
 import { WorldDatabase } from './storage/database'
 import {
@@ -54,8 +51,7 @@ export class Minecraft2Game {
   private readonly ui: GameUiController
   private readonly engine: Engine
   private readonly scene: Scene
-  private readonly hemiLight: HemisphericLight
-  private readonly sunLight: DirectionalLight
+  private readonly lighting: LightingManager
   private readonly standbyCamera: UniversalCamera
   private readonly settings: SettingsSave = {
     renderDistance: DEFAULT_RENDER_DISTANCE,
@@ -118,19 +114,14 @@ export class Minecraft2Game {
     this.scene = new Scene(this.engine)
     this.scene.setRenderingAutoClearDepthStencil(1, false)
     this.scene.setRenderingAutoClearDepthStencil(2, false)
-    this.scene.clearColor = new Color4(0.72, 0.86, 0.98, 1)
     this.scene.fogMode = Scene.FOGMODE_EXP2
-    this.scene.fogDensity = 0.012
-    this.scene.fogColor = new Color3(0.72, 0.86, 0.98)
     this.standbyCamera = new UniversalCamera('standby-camera', new Vector3(0, 18, -22), this.scene)
     this.standbyCamera.rotation.set(0.36, 0, 0)
     this.scene.activeCamera = this.standbyCamera
 
-    this.hemiLight = new HemisphericLight('hemi', new Vector3(0, 1, 0), this.scene)
-    this.hemiLight.intensity = 0.8
-    this.sunLight = new DirectionalLight('sun', new Vector3(-0.3, -1, 0.35), this.scene)
-    this.sunLight.position = new Vector3(20, 40, -20)
-    this.sunLight.intensity = 0.9
+    this.lighting = new LightingManager(this.scene)
+    this.lighting.setupPostProcessing(this.standbyCamera)
+    this.lighting.update(this.worldTime)
 
     window.addEventListener('resize', () => this.engine.resize())
     window.addEventListener('keydown', this.handleGlobalKeyDown)
@@ -221,21 +212,28 @@ export class Minecraft2Game {
     this.furnaceProgress = 0
     this.machineGunCooldown = 0
 
-    this.worldManager = new WorldManager(this.scene, this.registries, this.database, this.atlas.imageUrl)
+    this.worldManager = new WorldManager(this.scene, this.registries, this.database, this.atlas.imageUrl, this.lighting)
     this.worldManager.attachAtlasRegions(this.atlas.regions)
-    this.entityManager = new EntityManager(this.scene, this.registries, this.worldManager, {
-      giveItem: (itemId, count) => this.giveItemToPlayer(itemId, count),
-      damagePlayer: (amount) => {
-        this.player?.damage(amount)
-        if ((this.player?.health ?? 1) <= 0) {
-          this.setMode('dead')
-        }
+    this.entityManager = new EntityManager(
+      this.scene,
+      this.registries,
+      this.worldManager,
+      {
+        giveItem: (itemId, count) => this.giveItemToPlayer(itemId, count),
+        damagePlayer: (amount) => {
+          this.player?.damage(amount)
+          if ((this.player?.health ?? 1) <= 0) {
+            this.setMode('dead')
+          }
+        },
       },
-    })
+      this.lighting,
+    )
     this.player = new PlayerController(this.scene, this.ui.canvas, this.worldManager, {
       onToggleInventory: () => this.toggleInventory(),
       onTogglePause: () => this.togglePause(),
     })
+    this.lighting.setupPostProcessing(this.player.camera)
     this.player.setResources(
       this.atlas,
       (itemId) => {
@@ -911,18 +909,7 @@ export class Minecraft2Game {
   }
 
   private updateEnvironment(): void {
-    const sunPhase = Math.sin(this.worldTime * Math.PI * 2 - Math.PI / 2) * 0.5 + 0.5
-    const daylight = clamp(sunPhase * 1.2, 0.12, 1)
-    this.sunLight.intensity = daylight
-    this.hemiLight.intensity = 0.35 + daylight * 0.6
-    const sky = new Color4(
-      0.09 + daylight * 0.63,
-      0.12 + daylight * 0.72,
-      0.18 + daylight * 0.8,
-      1,
-    )
-    this.scene.clearColor = sky
-    this.scene.fogColor = new Color3(sky.r, sky.g, sky.b)
+    this.lighting.update(this.worldTime, this.player?.position)
   }
 
   private async update(deltaSeconds: number): Promise<void> {
