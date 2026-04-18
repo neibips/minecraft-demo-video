@@ -23,6 +23,7 @@ import { getChunkCoord, getChunkKey, getHeightIndex, getLocalCoord, getVoxelInde
 import { buildChunkMesh } from './mesher'
 import type { WorldWorkerResponse } from './protocol'
 import { LightingManager } from '../render/lighting'
+import { createDistanceAwareTexture } from '../render/texture'
 
 interface LoadedChunk {
   data: ChunkData
@@ -96,11 +97,8 @@ export class WorldManager {
 
   private createBlockMaterial(name: string, textureUrl: string, useAlpha: boolean): StandardMaterial {
     const material = new StandardMaterial(name, this.scene)
-    const texture = new Texture(textureUrl, this.scene, true, false, Texture.NEAREST_SAMPLINGMODE)
+    const texture = createDistanceAwareTexture(textureUrl, this.scene)
     texture.hasAlpha = useAlpha
-    texture.updateSamplingMode(Texture.NEAREST_SAMPLINGMODE)
-    texture.wrapU = Texture.CLAMP_ADDRESSMODE
-    texture.wrapV = Texture.CLAMP_ADDRESSMODE
     material.diffuseTexture = texture
     material.diffuseColor = Color3.White()
     material.emissiveColor = Color3.Black()

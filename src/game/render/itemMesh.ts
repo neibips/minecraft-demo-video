@@ -10,6 +10,7 @@ import {
 } from '@babylonjs/core'
 import type { Scene } from '@babylonjs/core'
 import type { BlockAtlas, BlockDefinition } from '../types'
+import { createDistanceAwareTexture } from './texture'
 
 const DEFAULT_THICKNESS = 1 / 16
 
@@ -37,11 +38,8 @@ const readImagePixels = (image: HTMLImageElement): Uint8ClampedArray => {
 
 export const createHeldItemMaterial = (scene: Scene, name: string, textureUrl: string): StandardMaterial => {
   const material = new StandardMaterial(name, scene)
-  const texture = new Texture(textureUrl, scene, true, false, Texture.NEAREST_SAMPLINGMODE)
+  const texture = createDistanceAwareTexture(textureUrl, scene)
   texture.hasAlpha = true
-  texture.updateSamplingMode(Texture.NEAREST_SAMPLINGMODE)
-  texture.wrapU = Texture.CLAMP_ADDRESSMODE
-  texture.wrapV = Texture.CLAMP_ADDRESSMODE
   material.diffuseTexture = texture
   material.emissiveColor = new Color3(0.9, 0.9, 0.9)
   material.specularColor = Color3.Black()

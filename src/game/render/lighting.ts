@@ -176,6 +176,7 @@ export class LightingManager {
   setupPostProcessing(camera: Camera): void {
     this.pipeline?.dispose()
     this.pipeline = new DefaultRenderingPipeline('lighting-pipeline', false, this.scene, [camera])
+    this.pipeline.samples = Math.min(4, this.scene.getEngine().getCaps().maxMSAASamples || 1)
     this.pipeline.fxaaEnabled = false
     this.pipeline.bloomEnabled = true
     this.pipeline.bloomThreshold = 1.05

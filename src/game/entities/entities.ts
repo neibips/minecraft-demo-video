@@ -2,13 +2,13 @@ import {
   Material,
   MeshBuilder,
   StandardMaterial,
-  Texture,
   TransformNode,
   Vector3,
   Color3,
 } from '@babylonjs/core'
 import type { Scene } from '@babylonjs/core'
 import { INTERACTION_RANGE, ITEM_DROP_LIFETIME, ITEM_DROP_PICKUP_RADIUS, MOB_DESPAWN_DISTANCE } from '../config'
+import { createDistanceAwareTexture } from '../render/texture'
 import { createEntityVisual } from './models'
 import type {
   EntityDefinition,
@@ -200,11 +200,8 @@ export class EntityManager {
   private getOrCreateItemMaterial(textureUrl: string): StandardMaterial {
     if (!this.itemMaterials.has(textureUrl)) {
       const material = new StandardMaterial(`item-${textureUrl}`, this.scene)
-      const texture = new Texture(textureUrl, this.scene, true, false, Texture.NEAREST_SAMPLINGMODE)
+      const texture = createDistanceAwareTexture(textureUrl, this.scene)
       texture.hasAlpha = true
-      texture.updateSamplingMode(Texture.NEAREST_SAMPLINGMODE)
-      texture.wrapU = Texture.CLAMP_ADDRESSMODE
-      texture.wrapV = Texture.CLAMP_ADDRESSMODE
       material.diffuseTexture = texture
       material.diffuseColor = Color3.White()
       material.emissiveColor = new Color3(0.15, 0.15, 0.15)

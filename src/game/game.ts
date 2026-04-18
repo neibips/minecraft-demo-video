@@ -107,10 +107,15 @@ export class Minecraft2Game {
       getItemTexture: (itemId) => this.registries.items.get(itemId)?.texture ?? null,
     })
 
-    this.engine = new Engine(this.ui.canvas, true, {
-      preserveDrawingBuffer: true,
-      stencil: true,
-    })
+    this.engine = new Engine(
+      this.ui.canvas,
+      true,
+      {
+        preserveDrawingBuffer: true,
+        stencil: true,
+      },
+      true,
+    )
     this.scene = new Scene(this.engine)
     this.scene.setRenderingAutoClearDepthStencil(1, false)
     this.scene.setRenderingAutoClearDepthStencil(2, false)

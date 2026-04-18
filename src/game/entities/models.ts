@@ -3,13 +3,13 @@ import {
   Material,
   MeshBuilder,
   StandardMaterial,
-  Texture,
   TransformNode,
   Vector3,
   Vector4,
 } from '@babylonjs/core'
 import type { Scene } from '@babylonjs/core'
 import { assetData } from '../data/assets'
+import { createDistanceAwareTexture } from '../render/texture'
 import type { ParsedEntityModel } from '../types'
 
 interface EntityVisual {
@@ -222,11 +222,8 @@ const createGeneratedGodzillaTexture = (): string => {
 
 const createTextureMaterial = (scene: Scene, name: string, textureUrl: string): StandardMaterial => {
   const material = new StandardMaterial(name, scene)
-  const texture = new Texture(textureUrl, scene, true, false, Texture.NEAREST_SAMPLINGMODE)
+  const texture = createDistanceAwareTexture(textureUrl, scene)
   texture.hasAlpha = true
-  texture.updateSamplingMode(Texture.NEAREST_SAMPLINGMODE)
-  texture.wrapU = Texture.CLAMP_ADDRESSMODE
-  texture.wrapV = Texture.CLAMP_ADDRESSMODE
   material.diffuseTexture = texture
   material.diffuseColor = Color3.White()
   material.emissiveColor = Color3.Black()
