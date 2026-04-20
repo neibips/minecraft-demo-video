@@ -15,6 +15,9 @@ export interface BlockTextureSet {
   right?: string
 }
 
+export type BlockFacing = 'north' | 'south' | 'east' | 'west'
+export type BlockShape = 'cube' | 'cross_plane' | 'torch' | 'stairs'
+
 export interface BlockDefinition {
   id: BlockId
   code: number
@@ -26,6 +29,8 @@ export interface BlockDefinition {
   transparent: boolean
   translucent: boolean
   crossPlane: boolean
+  shape: BlockShape
+  facing?: BlockFacing
   fluid: boolean
   fluidLevel?: number
   breakTime: number
@@ -116,6 +121,24 @@ export interface ChunkCoord {
   z: number
 }
 
+export interface StructureBounds {
+  minX: number
+  minY: number
+  minZ: number
+  maxX: number
+  maxY: number
+  maxZ: number
+}
+
+export interface PlacedStructureRecord {
+  placementId: string
+  structureName: string
+  sourceChunk: ChunkCoord
+  worldOrigin: { x: number; y: number; z: number }
+  anchorWorld: { x: number; y: number; z: number }
+  bounds: StructureBounds
+}
+
 export interface ChunkData {
   coord: ChunkCoord
   blocks: Uint16Array
@@ -123,6 +146,7 @@ export interface ChunkData {
   biomes: BiomeId[]
   dirty: boolean
   blockEntities: Record<string, BlockEntitySave>
+  structures: PlacedStructureRecord[]
 }
 
 export interface SurfaceSpawnHint {
@@ -138,6 +162,7 @@ export interface ChunkWorkerResponse {
   heights: Uint8Array
   biomes: BiomeId[]
   spawns: SurfaceSpawnHint[]
+  structures: PlacedStructureRecord[]
 }
 
 export interface WorldMetadata {
@@ -173,6 +198,7 @@ export interface ChunkSaveRecord {
   heights: number[]
   biomes: BiomeId[]
   blockEntities: Record<string, BlockEntitySave>
+  structures?: PlacedStructureRecord[]
   updatedAt: number
 }
 

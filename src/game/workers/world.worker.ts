@@ -2,6 +2,7 @@
 
 import { CHUNK_SIZE, SEA_LEVEL, WORLD_HEIGHT } from '../config'
 import type { BiomeId, ChunkWorkerResponse, SurfaceSpawnHint } from '../types'
+import { applyStructuresToChunk, collectStructuresForChunk } from '../structures/generator'
 import { getHeightIndex, getVoxelIndex } from '../utils/chunk'
 import { clamp, createSeededRandom, hashString } from '../utils/math'
 import { createNoiseTools } from '../world/noise'
@@ -512,6 +513,19 @@ const carveOre = (blocks: Uint16Array, x: number, y: number, z: number, blockId:
   }
 }
 
+const isInsideStructureFootprint = (
+  worldX: number,
+  worldZ: number,
+  structures: ChunkWorkerResponse['structures'],
+): boolean =>
+  structures.some(
+    (structure) =>
+      worldX >= structure.bounds.minX &&
+      worldX < structure.bounds.maxX &&
+      worldZ >= structure.bounds.minZ &&
+      worldZ < structure.bounds.maxZ,
+  )
+
 const generateChunk = (coordX: number, coordZ: number): ChunkWorkerResponse => {
   const blocks = new Uint16Array(CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT)
   const heights = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE)
@@ -519,7 +533,8 @@ const generateChunk = (coordX: number, coordZ: number): ChunkWorkerResponse => {
   const terrain: TerrainSample[] = new Array(CHUNK_SIZE * CHUNK_SIZE)
   const spawns: SurfaceSpawnHint[] = []
   const sampleTerrain = createTerrainSampler()
-  const chunkRandom = createSeededRandom(hashString(`${seed}:${coordX}:${coordZ}`))
+  const spawnRandom = createSeededRandom(hashString(`${seed}:spawns:${coordX}:${coordZ}`))
+  const oreRandom = createSeededRandom(hashString(`${seed}:ores:${coordX}:${coordZ}`))
 
   for (let localZ = 0; localZ < CHUNK_SIZE; localZ += 1) {
     for (let localX = 0; localX < CHUNK_SIZE; localX += 1) {
@@ -594,6 +609,50 @@ const generateChunk = (coordX: number, coordZ: number): ChunkWorkerResponse => {
     }
   }
 
+  for (let vein = 0; vein < 10; vein += 1) {
+    carveOre(
+      blocks,
+      Math.floor(oreRandom() * CHUNK_SIZE),
+      6 + Math.floor(oreRandom() * 22),
+      Math.floor(oreRandom() * CHUNK_SIZE),
+      'coal_ore',
+      1 + Math.floor(oreRandom() * 2),
+    )
+  }
+
+  for (let vein = 0; vein < 6; vein += 1) {
+    carveOre(
+      blocks,
+      Math.floor(oreRandom() * CHUNK_SIZE),
+      5 + Math.floor(oreRandom() * 18),
+      Math.floor(oreRandom() * CHUNK_SIZE),
+      'iron_ore',
+      1,
+    )
+  }
+
+  if (oreRandom() > 0.55) {
+    carveOre(
+      blocks,
+      Math.floor(oreRandom() * CHUNK_SIZE),
+      4 + Math.floor(oreRandom() * 14),
+      Math.floor(oreRandom() * CHUNK_SIZE),
+      'glowing_ore',
+      1,
+    )
+  }
+
+  if (oreRandom() > 0.72) {
+    carveOre(
+      blocks,
+      Math.floor(oreRandom() * CHUNK_SIZE),
+      3 + Math.floor(oreRandom() * 10),
+      Math.floor(oreRandom() * CHUNK_SIZE),
+      'diamond_ore',
+      1,
+    )
+  }
+
   for (let localZ = 1; localZ < CHUNK_SIZE - 1; localZ += 1) {
     for (let localX = 1; localX < CHUNK_SIZE - 1; localX += 1) {
       const index = getHeightIndex(localX, localZ)
@@ -625,63 +684,41 @@ const generateChunk = (coordX: number, coordZ: number): ChunkWorkerResponse => {
       ) {
         addFlower(blocks, localX, surfaceY + 1, localZ)
       }
+    }
+  }
+
+  const structurePlacements = collectStructuresForChunk(
+    seed,
+    coordX,
+    coordZ,
+    sampleTerrain,
+    (worldX, worldZ) => isSandyColumn(sampleTerrain, worldX, worldZ, sampleTerrain(worldX, worldZ)),
+  )
+  const structures = applyStructuresToChunk(blocks, coordX, coordZ, structurePlacements, blockCodes)
+
+  for (let localZ = 1; localZ < CHUNK_SIZE - 1; localZ += 1) {
+    for (let localX = 1; localX < CHUNK_SIZE - 1; localX += 1) {
+      const index = getHeightIndex(localX, localZ)
+      const biome = biomes[index]
+      const surfaceY = heights[index]
+      const worldX = coordX * CHUNK_SIZE + localX
+      const worldZ = coordZ * CHUNK_SIZE + localZ
+      if (isInsideStructureFootprint(worldX, worldZ, structures)) {
+        continue
+      }
 
       if (surfaceY > SEA_LEVEL + 1) {
-        if ((biome === 'forest' || biome === 'plains') && chunkRandom() > 0.984) {
+        if ((biome === 'forest' || biome === 'plains') && spawnRandom() > 0.984) {
           spawns.push({ x: worldX + 0.5, y: surfaceY + 1, z: worldZ + 0.5, entityId: 'chicken' })
         }
 
         const spiderBaseChance =
           biome === 'mountains' ? 0.998 : biome === 'forest' ? 0.996 : biome === 'plains' ? 0.998 : 1
-        if (biome !== 'beach' && biome !== 'lake' && chunkRandom() > spiderBaseChance) {
+        if (biome !== 'beach' && biome !== 'lake' && spawnRandom() > spiderBaseChance) {
           spawns.push({ x: worldX + 0.5, y: surfaceY + 1, z: worldZ + 0.5, entityId: 'spider' })
         }
       }
     }
-  }
-
-  for (let vein = 0; vein < 10; vein += 1) {
-    carveOre(
-      blocks,
-      Math.floor(chunkRandom() * CHUNK_SIZE),
-      6 + Math.floor(chunkRandom() * 22),
-      Math.floor(chunkRandom() * CHUNK_SIZE),
-      'coal_ore',
-      1 + Math.floor(chunkRandom() * 2),
-    )
-  }
-
-  for (let vein = 0; vein < 6; vein += 1) {
-    carveOre(
-      blocks,
-      Math.floor(chunkRandom() * CHUNK_SIZE),
-      5 + Math.floor(chunkRandom() * 18),
-      Math.floor(chunkRandom() * CHUNK_SIZE),
-      'iron_ore',
-      1,
-    )
-  }
-
-  if (chunkRandom() > 0.55) {
-    carveOre(
-      blocks,
-      Math.floor(chunkRandom() * CHUNK_SIZE),
-      4 + Math.floor(chunkRandom() * 14),
-      Math.floor(chunkRandom() * CHUNK_SIZE),
-      'glowing_ore',
-      1,
-    )
-  }
-
-  if (chunkRandom() > 0.72) {
-    carveOre(
-      blocks,
-      Math.floor(chunkRandom() * CHUNK_SIZE),
-      3 + Math.floor(chunkRandom() * 10),
-      Math.floor(chunkRandom() * CHUNK_SIZE),
-      'diamond_ore',
-      1,
-    )
   }
 
   return {
@@ -690,6 +727,7 @@ const generateChunk = (coordX: number, coordZ: number): ChunkWorkerResponse => {
     heights,
     biomes,
     spawns,
+    structures,
   }
 }
 

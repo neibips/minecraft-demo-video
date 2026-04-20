@@ -28,6 +28,7 @@ import {
 import type {
   ActiveCraftingStation,
   FurnaceBlockEntity,
+  ItemDefinition,
   NullableInventorySlot,
   PlayerSave,
   SettingsSave,
@@ -40,12 +41,14 @@ import { PlayerController } from './player/controller'
 import { WorldManager } from './world/worldManager'
 import { findCraftMatch, findSmeltingRecipe, consumeCraftIngredients } from './crafting/crafting'
 import { clamp } from './utils/math'
+import { getHorizontalFacingFromYaw, resolveStairBlockId } from './world/blockShape'
 
 type GameMode = UiRenderState['mode']
 
 const MACHINE_GUN_AMMO_ITEM_ID = 'iron_nugget'
 const MACHINE_GUN_FIRE_INTERVAL = 0.09
 const MACHINE_GUN_RANGE = 18
+const CIGARETTE_ITEM_ID = 'cigarette'
 
 export class Minecraft2Game {
   private readonly root: HTMLElement
@@ -302,6 +305,7 @@ export class Minecraft2Game {
     }
 
     this.ensurePlayerInventoryItemCount('iron_ingot', 30)
+    this.ensureItemEquipped(CIGARETTE_ITEM_ID)
 
     await this.worldManager.updateAroundPlayer(this.player.position)
     this.syncHeldItem()
@@ -379,6 +383,38 @@ export class Minecraft2Game {
       return
     }
     this.giveItemToPlayer(itemId, minimumCount - currentCount)
+  }
+
+  private findItemSlotIndex(slots: NullableInventorySlot[], itemId: string): number {
+    return slots.findIndex((slot) => slot?.itemId === itemId)
+  }
+
+  private ensureItemEquipped(itemId: string): void {
+    this.ensurePlayerInventoryItemCount(itemId, 1)
+
+    const hotbarIndex = this.findItemSlotIndex(this.hotbar, itemId)
+    if (hotbarIndex >= 0) {
+      this.selectedHotbarIndex = hotbarIndex
+      this.syncHeldItem()
+      this.uiDirty = true
+      return
+    }
+
+    const inventoryIndex = this.findItemSlotIndex(this.inventory, itemId)
+    if (inventoryIndex < 0) {
+      this.syncHeldItem()
+      return
+    }
+
+    const emptyHotbarIndex = this.hotbar.findIndex((slot) => !slot)
+    const targetHotbarIndex =
+      emptyHotbarIndex >= 0 ? emptyHotbarIndex : clamp(this.selectedHotbarIndex, 0, HOTBAR_SIZE - 1)
+    const displacedSlot = this.hotbar[targetHotbarIndex]
+    this.hotbar[targetHotbarIndex] = this.inventory[inventoryIndex]
+    this.inventory[inventoryIndex] = displacedSlot
+    this.selectedHotbarIndex = targetHotbarIndex
+    this.syncHeldItem()
+    this.uiDirty = true
   }
 
   private consumePlayerItem(itemId: string, count: number): boolean {
@@ -620,8 +656,8 @@ export class Minecraft2Game {
     )
   }
 
-  private intersectsPlayerBounds(worldX: number, worldY: number, worldZ: number): boolean {
-    if (!this.player) {
+  private intersectsPlayerBounds(worldX: number, worldY: number, worldZ: number, blockCode: number): boolean {
+    if (!this.player || !this.worldManager) {
       return false
     }
 
@@ -633,21 +669,21 @@ export class Minecraft2Game {
     const playerMinZ = this.player.position.z - halfWidth
     const playerMaxZ = this.player.position.z + halfWidth
 
-    const blockMinX = worldX
-    const blockMaxX = worldX + 1
-    const blockMinY = worldY
-    const blockMaxY = worldY + 1
-    const blockMinZ = worldZ
-    const blockMaxZ = worldZ + 1
-
-    return (
-      blockMaxX > playerMinX &&
-      blockMinX < playerMaxX &&
-      blockMaxY > playerMinY &&
-      blockMinY < playerMaxY &&
-      blockMaxZ > playerMinZ &&
-      blockMinZ < playerMaxZ
+    return this.worldManager.getCollisionBoxes(worldX, worldY, worldZ, blockCode).some((box) =>
+      box.maxX > playerMinX &&
+      box.minX < playerMaxX &&
+      box.maxY > playerMinY &&
+      box.minY < playerMaxY &&
+      box.maxZ > playerMinZ &&
+      box.minZ < playerMaxZ,
     )
+  }
+
+  private resolvePlacementBlockId(item: ItemDefinition): string | null {
+    if (item.id === 'wood_stairs' || item.id === 'cobblestone_stairs') {
+      return resolveStairBlockId(item.id, getHorizontalFacingFromYaw(this.player?.yaw ?? 0))
+    }
+    return item.placeableBlockId ?? null
   }
 
   private takeCraftResult(kind: 'inventory' | 'table'): void {
@@ -853,7 +889,8 @@ export class Minecraft2Game {
         return
       }
 
-      if (!item.placeableBlockId) {
+      const placeableBlockId = this.resolvePlacementBlockId(item)
+      if (!placeableBlockId) {
         return
       }
 
@@ -861,14 +898,55 @@ export class Minecraft2Game {
       if (targetBlock) {
         return
       }
-      if (this.intersectsPlayerBounds(hit.adjacentPosition.x, hit.adjacentPosition.y, hit.adjacentPosition.z)) {
+      const placeableBlockCode = this.registries.blockCodes[placeableBlockId]
+      if (!placeableBlockCode) {
+        return
+      }
+      if (placeableBlockId === 'torch') {
+        const supports = [
+          this.worldManager.getBlockDefinition(
+            hit.adjacentPosition.x,
+            hit.adjacentPosition.y - 1,
+            hit.adjacentPosition.z,
+          ),
+          this.worldManager.getBlockDefinition(
+            hit.adjacentPosition.x - 1,
+            hit.adjacentPosition.y,
+            hit.adjacentPosition.z,
+          ),
+          this.worldManager.getBlockDefinition(
+            hit.adjacentPosition.x + 1,
+            hit.adjacentPosition.y,
+            hit.adjacentPosition.z,
+          ),
+          this.worldManager.getBlockDefinition(
+            hit.adjacentPosition.x,
+            hit.adjacentPosition.y,
+            hit.adjacentPosition.z - 1,
+          ),
+          this.worldManager.getBlockDefinition(
+            hit.adjacentPosition.x,
+            hit.adjacentPosition.y,
+            hit.adjacentPosition.z + 1,
+          ),
+        ]
+        if (!supports.some((support) => support?.collidable && !support.fluid)) {
+          return
+        }
+      }
+      if (this.intersectsPlayerBounds(
+        hit.adjacentPosition.x,
+        hit.adjacentPosition.y,
+        hit.adjacentPosition.z,
+        placeableBlockCode,
+      )) {
         return
       }
       await this.worldManager.setBlock(
         hit.adjacentPosition.x,
         hit.adjacentPosition.y,
         hit.adjacentPosition.z,
-        this.registries.blockCodes[item.placeableBlockId],
+        placeableBlockCode,
       )
       selected.count -= 1
       if (selected.count <= 0) {

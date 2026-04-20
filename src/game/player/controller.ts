@@ -8,9 +8,6 @@ import {
 } from '@babylonjs/core'
 import type { Mesh, Scene } from '@babylonjs/core'
 import {
-  CROUCH_EYE_HEIGHT,
-  CROUCH_HEIGHT,
-  CROUCH_SPEED,
   GRAVITY,
   JUMP_VELOCITY,
   MAX_HEALTH,
@@ -31,7 +28,7 @@ import type { BlockAtlas, BlockDefinition, ItemDefinition, PlayerSave } from '..
 import { clamp } from '../utils/math'
 import { WorldManager } from '../world/worldManager'
 
-type HeldKind = 'block' | 'tool' | 'sword' | 'gun' | 'item'
+type HeldKind = 'block' | 'tool' | 'sword' | 'gun' | 'item' | 'cigarette'
 
 interface HeldTransform {
   position: Vector3
@@ -40,6 +37,7 @@ interface HeldTransform {
 }
 
 const NON_BLOCK_HELD_Y_OFFSET = 0.1
+const MAX_STEP_HEIGHT = 0.6
 
 const HELD_PRESETS: Record<HeldKind, HeldTransform> = {
   block: {
@@ -66,6 +64,11 @@ const HELD_PRESETS: Record<HeldKind, HeldTransform> = {
     position: new Vector3(0.06, 0.08 + NON_BLOCK_HELD_Y_OFFSET, 0.22),
     rotation: new Vector3(-0.25, 0.35, 0.25),
     scale: 0.5,
+  },
+  cigarette: {
+    position: new Vector3(0.17, 0.04, 0.16),
+    rotation: new Vector3(-0.18, -0.72, 1.22),
+    scale: 0.28,
   },
 }
 
@@ -350,7 +353,10 @@ export class PlayerController {
     this.heldMeshes.set(cacheKey, placeholder)
     this.showHeldMesh(placeholder, preset)
 
-    void buildExtrudedItemMesh(this.scene, item.texture, { name: `held-item-${item.id}` })
+    void buildExtrudedItemMesh(this.scene, item.texture, {
+      name: `held-item-${item.id}`,
+      thickness: item.id === 'cigarette' ? 1 / 32 : undefined,
+    })
       .then((mesh) => {
         if (!this.heldMeshes.has(cacheKey)) {
           mesh.dispose()
@@ -386,7 +392,10 @@ export class PlayerController {
   }
 
   private resolveHeldKind(item: ItemDefinition, block: BlockDefinition | undefined): HeldKind {
-    if (block && item.placeableBlockId) {
+    if (item.id === 'cigarette') {
+      return 'cigarette'
+    }
+    if (block && item.placeableBlockId && block.shape === 'cube' && !block.crossPlane) {
       return 'block'
     }
     if (item.category === 'tool') {
@@ -428,9 +437,8 @@ export class PlayerController {
   }
 
   update(deltaSeconds: number, movementEnabled: boolean): void {
-    const targetHeight = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') ? CROUCH_HEIGHT : PLAYER_HEIGHT
-    const eyeHeight = targetHeight === CROUCH_HEIGHT ? CROUCH_EYE_HEIGHT : PLAYER_EYE_HEIGHT
-    this.currentHeight = targetHeight
+    const eyeHeight = PLAYER_EYE_HEIGHT
+    this.currentHeight = PLAYER_HEIGHT
 
     const inFluid = this.world.getBlockDefinition(
       Math.floor(this.position.x),
@@ -460,14 +468,16 @@ export class PlayerController {
         move.normalize()
       }
 
-      const isCrouching = targetHeight === CROUCH_HEIGHT
+      const isSprinting =
+        this.keys.has('ShiftLeft') ||
+        this.keys.has('ShiftRight') ||
+        this.keys.has('ControlLeft') ||
+        this.keys.has('ControlRight')
       const speed = inFluid
         ? SWIM_SPEED
-        : isCrouching
-          ? CROUCH_SPEED
-          : this.keys.has('ControlLeft') || this.keys.has('ControlRight')
-            ? SPRINT_SPEED
-            : WALK_SPEED
+        : isSprinting
+          ? SPRINT_SPEED
+          : WALK_SPEED
 
       this.velocity.x = move.x * speed
       this.velocity.z = move.z * speed
@@ -491,7 +501,7 @@ export class PlayerController {
     }
 
     const previousY = this.position.y
-    this.moveWithCollisions(deltaSeconds, targetHeight)
+    this.moveWithCollisions(deltaSeconds, PLAYER_HEIGHT)
     if (!this.onGround && this.position.y < previousY) {
       this.lastGroundY = previousY
     }
@@ -527,18 +537,35 @@ export class PlayerController {
   }
 
   private collides(position: Vector3, height: number): boolean {
-    const minX = Math.floor(position.x - PLAYER_WIDTH / 2)
-    const maxX = Math.floor(position.x + PLAYER_WIDTH / 2)
-    const minY = Math.floor(position.y)
-    const maxY = Math.floor(position.y + height)
-    const minZ = Math.floor(position.z - PLAYER_WIDTH / 2)
-    const maxZ = Math.floor(position.z + PLAYER_WIDTH / 2)
+    const epsilon = 0.001
+    const minX = Math.floor(position.x - PLAYER_WIDTH / 2 + epsilon)
+    const maxX = Math.floor(position.x + PLAYER_WIDTH / 2 - epsilon)
+    const minY = Math.floor(position.y + epsilon)
+    const maxY = Math.floor(position.y + height - epsilon)
+    const minZ = Math.floor(position.z - PLAYER_WIDTH / 2 + epsilon)
+    const maxZ = Math.floor(position.z + PLAYER_WIDTH / 2 - epsilon)
+
+    const playerMinX = position.x - PLAYER_WIDTH / 2
+    const playerMaxX = position.x + PLAYER_WIDTH / 2
+    const playerMinY = position.y
+    const playerMaxY = position.y + height
+    const playerMinZ = position.z - PLAYER_WIDTH / 2
+    const playerMaxZ = position.z + PLAYER_WIDTH / 2
 
     for (let y = minY; y <= maxY; y += 1) {
       for (let z = minZ; z <= maxZ; z += 1) {
         for (let x = minX; x <= maxX; x += 1) {
-          if (this.world.getBlockDefinition(x, y, z)?.collidable) {
-            return true
+          for (const box of this.world.getCollisionBoxes(x, y, z)) {
+            if (
+              box.maxX > playerMinX &&
+              box.minX < playerMaxX &&
+              box.maxY > playerMinY &&
+              box.minY < playerMaxY &&
+              box.maxZ > playerMinZ &&
+              box.minZ < playerMaxZ
+            ) {
+              return true
+            }
           }
         }
       }
@@ -550,6 +577,7 @@ export class PlayerController {
   private moveWithCollisions(deltaSeconds: number, height: number): void {
     const axes: Array<'x' | 'y' | 'z'> = ['x', 'y', 'z']
     const movement = this.velocity.scale(deltaSeconds)
+    const startedOnGround = this.onGround
     this.onGround = false
 
     for (const axis of axes) {
@@ -571,6 +599,26 @@ export class PlayerController {
         }
         this.velocity.y = 0
       } else {
+        if (startedOnGround && movement[axis] !== 0) {
+          const stepped = next.clone()
+          stepped.y += MAX_STEP_HEIGHT
+          if (!this.collides(stepped, height)) {
+            while (stepped.y > this.position.y) {
+              const lowered = stepped.clone()
+              lowered.y = Math.max(this.position.y, stepped.y - 0.05)
+              if (this.collides(lowered, height)) {
+                break
+              }
+              stepped.copyFrom(lowered)
+              if (lowered.y === this.position.y) {
+                break
+              }
+            }
+            this.position.copyFrom(stepped)
+            this.onGround = true
+            continue
+          }
+        }
         this.velocity[axis] = 0
       }
     }

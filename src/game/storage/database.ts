@@ -160,6 +160,7 @@ export class WorldDatabase {
     heights: Uint8Array,
     biomes: ChunkSaveRecord['biomes'],
     blockEntities: ChunkSaveRecord['blockEntities'],
+    structures: ChunkSaveRecord['structures'],
   ): ChunkSaveRecord {
     return {
       key,
@@ -168,6 +169,7 @@ export class WorldDatabase {
       heights: Array.from(heights),
       biomes,
       blockEntities,
+      structures,
       updatedAt: Date.now(),
     }
   }

@@ -12,3 +12,17 @@ coal_ore
 diamond_ore
 glowing_ore
 flower
+cobblestone
+stone_bricks
+mossy_cobblestone
+dark_planks
+bookshelf
+torch
+wood_stairs_north
+wood_stairs_south
+wood_stairs_east
+wood_stairs_west
+cobblestone_stairs_north
+cobblestone_stairs_south
+cobblestone_stairs_east
+cobblestone_stairs_west

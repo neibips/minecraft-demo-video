@@ -24,6 +24,7 @@ import { buildChunkMesh } from './mesher'
 import type { WorldWorkerResponse } from './protocol'
 import { LightingManager } from '../render/lighting'
 import { createDistanceAwareTexture } from '../render/texture'
+import { getBlockLocalCollisionBoxes } from './blockShape'
 
 interface LoadedChunk {
   data: ChunkData
@@ -95,13 +96,18 @@ export class WorldManager {
     }
   }
 
-  private createBlockMaterial(name: string, textureUrl: string, useAlpha: boolean): StandardMaterial {
+  private createBlockMaterial(name: string, textureUrl: string, useAlpha: boolean, emitsLight = 0): StandardMaterial {
     const material = new StandardMaterial(name, this.scene)
     const texture = createDistanceAwareTexture(textureUrl, this.scene)
     texture.hasAlpha = useAlpha
     material.diffuseTexture = texture
     material.diffuseColor = Color3.White()
-    material.emissiveColor = Color3.Black()
+    if (emitsLight > 0) {
+      const emissiveStrength = Math.min(1, emitsLight / 12)
+      material.emissiveColor = new Color3(0.42, 0.36, 0.22).scale(emissiveStrength)
+    } else {
+      material.emissiveColor = Color3.Black()
+    }
     material.ambientColor = Color3.White()
     material.specularColor = Color3.Black()
     material.backFaceCulling = false
@@ -144,8 +150,9 @@ export class WorldManager {
     return material
   }
 
-  private getOrCreateSolidMaterial(textureUrl: string): StandardMaterial {
-    const existing = this.solidMaterials.get(textureUrl)
+  private getOrCreateSolidMaterial(textureUrl: string, emitsLight = 0): StandardMaterial {
+    const key = `${emitsLight}::${textureUrl}`
+    const existing = this.solidMaterials.get(key)
     if (existing) {
       return existing
     }
@@ -154,13 +161,15 @@ export class WorldManager {
       `chunk-solid-material-${this.solidMaterials.size}`,
       textureUrl,
       false,
+      emitsLight,
     )
-    this.solidMaterials.set(textureUrl, material)
+    this.solidMaterials.set(key, material)
     return material
   }
 
-  private getOrCreateCutoutMaterial(textureUrl: string): StandardMaterial {
-    const existing = this.cutoutMaterials.get(textureUrl)
+  private getOrCreateCutoutMaterial(textureUrl: string, emitsLight = 0): StandardMaterial {
+    const key = `${emitsLight}::${textureUrl}`
+    const existing = this.cutoutMaterials.get(key)
     if (existing) {
       return existing
     }
@@ -169,15 +178,16 @@ export class WorldManager {
       `chunk-cutout-material-${this.cutoutMaterials.size}`,
       textureUrl,
       true,
+      emitsLight,
     )
-    this.cutoutMaterials.set(textureUrl, material)
+    this.cutoutMaterials.set(key, material)
     return material
   }
 
   private getChunkMaterials() {
     return {
-      solid: (textureUrl: string) => this.getOrCreateSolidMaterial(textureUrl),
-      cutout: (textureUrl: string) => this.getOrCreateCutoutMaterial(textureUrl),
+      solid: (textureUrl: string, emitsLight = 0) => this.getOrCreateSolidMaterial(textureUrl, emitsLight),
+      cutout: (textureUrl: string, emitsLight = 0) => this.getOrCreateCutoutMaterial(textureUrl, emitsLight),
       fluid: this.waterMaterial,
     }
   }
@@ -272,6 +282,7 @@ export class WorldManager {
         biomes: saved.biomes,
         dirty: false,
         blockEntities: saved.blockEntities ?? {},
+        structures: saved.structures ?? [],
       }
     }
 
@@ -287,6 +298,7 @@ export class WorldManager {
       biomes: generated.biomes,
       dirty: false,
       blockEntities: {},
+      structures: generated.structures,
     }
   }
 
@@ -416,6 +428,25 @@ export class WorldManager {
     return code ? this.registries.blocksByCode.get(code) : undefined
   }
 
+  getCollisionBoxes(worldX: number, y: number, worldZ: number, blockCode?: number) {
+    const resolvedCode = blockCode ?? this.getBlock(worldX, y, worldZ)
+    if (!resolvedCode) {
+      return []
+    }
+    const block = this.registries.blocksByCode.get(resolvedCode)
+    if (!block) {
+      return []
+    }
+    return getBlockLocalCollisionBoxes(block).map((box) => ({
+      minX: worldX + box.minX,
+      minY: y + box.minY,
+      minZ: worldZ + box.minZ,
+      maxX: worldX + box.maxX,
+      maxY: y + box.maxY,
+      maxZ: worldZ + box.maxZ,
+    }))
+  }
+
   queueFluidUpdate(worldX: number, y: number, worldZ: number): void {
     const key = `${worldX}:${y}:${worldZ}`
     this.fluidUpdateQueue.add(key)
@@ -488,6 +519,7 @@ export class WorldManager {
       loaded.data.heights,
       loaded.data.biomes,
       loaded.data.blockEntities,
+      loaded.data.structures,
     )
     await this.database.saveChunk(record)
     loaded.data.dirty = false

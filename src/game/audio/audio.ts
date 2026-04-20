@@ -9,6 +9,11 @@ const soundImports = import.meta.glob('../../../assets/sounds/**/*.mp3', {
 export type AmbientKey = 'music' | 'world'
 export type SfxKey = 'step' | 'land' | 'swing' | 'chicken' | 'spider' | 'godzilla'
 
+interface SfxSlice {
+  offset: number
+  duration: number
+}
+
 interface SfxConfig {
   pathMatch: string
   volume: number
@@ -16,6 +21,7 @@ interface SfxConfig {
   minIntervalMs: number
   maxConcurrent: number
   rate?: { min: number; max: number }
+  slices?: SfxSlice[]
 }
 
 interface AmbientConfig {
@@ -45,6 +51,18 @@ const SFX_CONFIG: Record<SfxKey, SfxConfig> = {
     minIntervalMs: 180,
     maxConcurrent: 3,
     rate: { min: 0.94, max: 1.08 },
+    slices: [
+      { offset: 0.48, duration: 0.46 },
+      { offset: 1.33, duration: 0.38 },
+      { offset: 1.91, duration: 0.22 },
+      { offset: 2.41, duration: 0.48 },
+      { offset: 3.36, duration: 0.38 },
+      { offset: 4.01, duration: 0.24 },
+      { offset: 4.49, duration: 0.22 },
+      { offset: 6.12, duration: 0.36 },
+      { offset: 8.02, duration: 0.18 },
+      { offset: 9.65, duration: 0.24 },
+    ],
   },
   land: {
     pathMatch: 'player/landing',
@@ -52,6 +70,7 @@ const SFX_CONFIG: Record<SfxKey, SfxConfig> = {
     maxDistance: 2,
     minIntervalMs: 160,
     maxConcurrent: 1,
+    slices: [{ offset: 0.44, duration: 0.28 }],
   },
   swing: {
     pathMatch: 'player/kick',
@@ -60,6 +79,11 @@ const SFX_CONFIG: Record<SfxKey, SfxConfig> = {
     minIntervalMs: 90,
     maxConcurrent: 3,
     rate: { min: 0.92, max: 1.1 },
+    slices: [
+      { offset: 0, duration: 0.18 },
+      { offset: 1.008, duration: 0.18 },
+      { offset: 2.019, duration: 0.18 },
+    ],
   },
   chicken: {
     pathMatch: 'chicken/',
@@ -67,6 +91,17 @@ const SFX_CONFIG: Record<SfxKey, SfxConfig> = {
     maxDistance: 26,
     minIntervalMs: 200,
     maxConcurrent: 3,
+    slices: [
+      { offset: 1.668, duration: 0.72 },
+      { offset: 3.489, duration: 0.94 },
+      { offset: 5.079, duration: 0.52 },
+      { offset: 6.229, duration: 0.44 },
+      { offset: 7.397, duration: 0.24 },
+      { offset: 8.062, duration: 0.63 },
+      { offset: 9.332, duration: 0.63 },
+      { offset: 10.45, duration: 0.63 },
+      { offset: 11.856, duration: 0.4 },
+    ],
   },
   spider: {
     pathMatch: 'spider/',
@@ -74,6 +109,7 @@ const SFX_CONFIG: Record<SfxKey, SfxConfig> = {
     maxDistance: 22,
     minIntervalMs: 220,
     maxConcurrent: 3,
+    slices: [{ offset: 1.75, duration: 0.65 }],
   },
   godzilla: {
     pathMatch: 'godzilla/',
@@ -81,6 +117,7 @@ const SFX_CONFIG: Record<SfxKey, SfxConfig> = {
     maxDistance: 70,
     minIntervalMs: 320,
     maxConcurrent: 2,
+    slices: [{ offset: 0, duration: 2.0 }],
   },
 }
 
@@ -285,7 +322,12 @@ export class AudioManager {
     }
     source.onended = cleanup
     try {
-      source.start()
+      if (config.slices && config.slices.length > 0) {
+        const slice = config.slices[Math.floor(Math.random() * config.slices.length)]
+        source.start(this.context.currentTime, slice.offset, slice.duration)
+      } else {
+        source.start()
+      }
     } catch {
       cleanup()
     }

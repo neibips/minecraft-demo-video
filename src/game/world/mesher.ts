@@ -3,12 +3,13 @@ import type { Scene, StandardMaterial } from '@babylonjs/core'
 import { CHUNK_SIZE, WORLD_HEIGHT } from '../config'
 import type { BlockDefinition, ChunkData, ChunkMeshHandle, RegistryBundle } from '../types'
 import { getVoxelIndex } from '../utils/chunk'
+import { getBlockLocalCollisionBoxes, isOpaqueCube } from './blockShape'
 
 type GetBlockAt = (x: number, y: number, z: number) => number
 
 interface ChunkMaterialSet {
-  solid: (textureUrl: string) => StandardMaterial
-  cutout: (textureUrl: string) => StandardMaterial
+  solid: (textureUrl: string, emitsLight?: number) => StandardMaterial
+  cutout: (textureUrl: string, emitsLight?: number) => StandardMaterial
   fluid: StandardMaterial
 }
 
@@ -126,9 +127,6 @@ const getBlockFaceTexture = (block: BlockDefinition, faceIndex: number): string 
   }
 }
 
-const isOpaqueCube = (block: BlockDefinition): boolean =>
-  block.collidable && !block.fluid && !block.crossPlane && !block.transparent && !block.translucent
-
 const shouldRenderFace = (current: BlockDefinition, neighbor: BlockDefinition | undefined): boolean => {
   if (!neighbor) {
     return true
@@ -178,6 +176,90 @@ const pushTexturedFace = (
   pushQuad(buffers, vertices, getFaceUvRect(faceIndex))
 }
 
+const getBoxFaceVertices = (
+  minX: number,
+  minY: number,
+  minZ: number,
+  maxX: number,
+  maxY: number,
+  maxZ: number,
+  faceIndex: number,
+): readonly Vertex[] => {
+  switch (faceIndex) {
+    case 0:
+      return [
+        [maxX, minY, minZ],
+        [maxX, maxY, minZ],
+        [maxX, maxY, maxZ],
+        [maxX, minY, maxZ],
+      ]
+    case 1:
+      return [
+        [minX, minY, maxZ],
+        [minX, maxY, maxZ],
+        [minX, maxY, minZ],
+        [minX, minY, minZ],
+      ]
+    case 2:
+      return [
+        [minX, maxY, maxZ],
+        [maxX, maxY, maxZ],
+        [maxX, maxY, minZ],
+        [minX, maxY, minZ],
+      ]
+    case 3:
+      return [
+        [minX, minY, minZ],
+        [maxX, minY, minZ],
+        [maxX, minY, maxZ],
+        [minX, minY, maxZ],
+      ]
+    case 4:
+      return [
+        [minX, minY, maxZ],
+        [maxX, minY, maxZ],
+        [maxX, maxY, maxZ],
+        [minX, maxY, maxZ],
+      ]
+    case 5:
+      return [
+        [maxX, minY, minZ],
+        [minX, minY, minZ],
+        [minX, maxY, minZ],
+        [maxX, maxY, minZ],
+      ]
+    default:
+      return []
+  }
+}
+
+const pushTexturedBoxFace = (
+  buffers: MeshBuffers,
+  x: number,
+  y: number,
+  z: number,
+  faceIndex: number,
+  box: {
+    minX: number
+    minY: number
+    minZ: number
+    maxX: number
+    maxY: number
+    maxZ: number
+  },
+): void => {
+  const vertices = getBoxFaceVertices(
+    x + box.minX,
+    y + box.minY,
+    z + box.minZ,
+    x + box.maxX,
+    y + box.maxY,
+    z + box.maxZ,
+    faceIndex,
+  )
+  pushQuad(buffers, vertices, getFaceUvRect(faceIndex))
+}
+
 const pushCrossPlane = (buffers: MeshBuffers, x: number, y: number, z: number): void => {
   const uvRect = [0, 1, 1, 1, 1, 0, 0, 0] as const
   const quads = [
@@ -192,6 +274,39 @@ const pushCrossPlane = (buffers: MeshBuffers, x: number, y: number, z: number): 
       [x + 0.15, y, z + 0.85],
       [x + 0.15, y + 1, z + 0.85],
       [x + 0.85, y + 1, z + 0.15],
+    ],
+  ] as const
+
+  for (const quad of quads) {
+    pushQuad(buffers, quad, uvRect)
+  }
+}
+
+const pushTorch = (
+  buffers: MeshBuffers,
+  x: number,
+  y: number,
+  z: number,
+  mount: 'floor' | 'west' | 'east' | 'north' | 'south',
+): void => {
+  const uvRect = [0, 1, 1, 1, 1, 0, 0, 0] as const
+  const inset = 0.18
+  const centerX = mount === 'west' ? x + 0.28 : mount === 'east' ? x + 0.72 : x + 0.5
+  const centerZ = mount === 'north' ? z + 0.28 : mount === 'south' ? z + 0.72 : z + 0.5
+  const minY = mount === 'floor' ? y : y + 0.18
+  const maxY = mount === 'floor' ? y + 0.625 : y + 0.82
+  const quads = [
+    [
+      [centerX - inset, minY, centerZ - inset],
+      [centerX + inset, minY, centerZ + inset],
+      [centerX + inset, maxY, centerZ + inset],
+      [centerX - inset, maxY, centerZ - inset],
+    ],
+    [
+      [centerX + inset, minY, centerZ - inset],
+      [centerX - inset, minY, centerZ + inset],
+      [centerX - inset, maxY, centerZ + inset],
+      [centerX + inset, maxY, centerZ - inset],
     ],
   ] as const
 
@@ -258,6 +373,83 @@ const getBufferMap = (): Record<MeshLayer, Map<string, MeshBuffers>> => ({
   fluid: new Map<string, MeshBuffers>(),
 })
 
+const getNeighborForBoxFace = (
+  block: BlockDefinition,
+  box: {
+    minX: number
+    minY: number
+    minZ: number
+    maxX: number
+    maxY: number
+    maxZ: number
+  },
+  faceIndex: number,
+  getBlockAt: GetBlockAt,
+  registries: RegistryBundle,
+  worldX: number,
+  y: number,
+  worldZ: number,
+): BlockDefinition | undefined => {
+  const normal = faceNormals[faceIndex]
+  const touchesBoundary =
+    (faceIndex === 0 && box.maxX === 1) ||
+    (faceIndex === 1 && box.minX === 0) ||
+    (faceIndex === 2 && box.maxY === 1) ||
+    (faceIndex === 3 && box.minY === 0) ||
+    (faceIndex === 4 && box.maxZ === 1) ||
+    (faceIndex === 5 && box.minZ === 0)
+
+  if (!touchesBoundary) {
+    return undefined
+  }
+
+  const neighborCode = getBlockAt(worldX + normal.x, y + normal.y, worldZ + normal.z)
+  return neighborCode ? registries.blocksByCode.get(neighborCode) : undefined
+}
+
+const getTorchMount = (
+  getBlockAt: GetBlockAt,
+  registries: RegistryBundle,
+  worldX: number,
+  y: number,
+  worldZ: number,
+): 'floor' | 'west' | 'east' | 'north' | 'south' => {
+  const west = getBlockAt(worldX - 1, y, worldZ)
+  const westBlock = west ? registries.blocksByCode.get(west) : undefined
+  if (westBlock && isOpaqueCube(westBlock)) {
+    return 'west'
+  }
+  const east = getBlockAt(worldX + 1, y, worldZ)
+  const eastBlock = east ? registries.blocksByCode.get(east) : undefined
+  if (eastBlock && isOpaqueCube(eastBlock)) {
+    return 'east'
+  }
+  const north = getBlockAt(worldX, y, worldZ - 1)
+  const northBlock = north ? registries.blocksByCode.get(north) : undefined
+  if (northBlock && isOpaqueCube(northBlock)) {
+    return 'north'
+  }
+  const south = getBlockAt(worldX, y, worldZ + 1)
+  const southBlock = south ? registries.blocksByCode.get(south) : undefined
+  if (southBlock && isOpaqueCube(southBlock)) {
+    return 'south'
+  }
+  return 'floor'
+}
+
+const encodeMaterialKey = (texture: string, emitsLight: number): string => `${emitsLight}::${texture}`
+
+const decodeMaterialKey = (value: string): { texture: string; emitsLight: number } => {
+  const separatorIndex = value.indexOf('::')
+  if (separatorIndex === -1) {
+    return { texture: value, emitsLight: 0 }
+  }
+  return {
+    emitsLight: Number(value.slice(0, separatorIndex)) || 0,
+    texture: value.slice(separatorIndex + 2),
+  }
+}
+
 const getOrCreateLayerBuffer = (
   bufferMap: Record<MeshLayer, Map<string, MeshBuffers>>,
   layer: MeshLayer,
@@ -309,7 +501,60 @@ export const buildChunkMesh = (
         if (block.crossPlane) {
           const texture = getBlockFaceTexture(textureBlock, 4)
           if (texture) {
-            pushCrossPlane(getOrCreateLayerBuffer(buffers, layer, texture), x, y, z)
+            pushCrossPlane(
+              getOrCreateLayerBuffer(buffers, layer, encodeMaterialKey(texture, textureBlock.emitsLight)),
+              x,
+              y,
+              z,
+            )
+          }
+          continue
+        }
+
+        if (block.shape === 'torch') {
+          const texture = getBlockFaceTexture(textureBlock, 4)
+          if (texture) {
+            pushTorch(
+              getOrCreateLayerBuffer(buffers, layer, encodeMaterialKey(texture, textureBlock.emitsLight)),
+              x,
+              y,
+              z,
+              getTorchMount(getBlockAt, registries, originX + x, y, originZ + z),
+            )
+          }
+          continue
+        }
+
+        if (block.shape === 'stairs') {
+          const boxBuffers = buffers
+          for (const box of getBlockLocalCollisionBoxes(block)) {
+            for (let faceIndex = 0; faceIndex < faceNormals.length; faceIndex += 1) {
+              const neighbor = getNeighborForBoxFace(
+                block,
+                box,
+                faceIndex,
+                getBlockAt,
+                registries,
+                originX + x,
+                y,
+                originZ + z,
+              )
+              if (!shouldRenderFace(block, neighbor)) {
+                continue
+              }
+              const texture = getBlockFaceTexture(textureBlock, faceIndex)
+              if (!texture) {
+                continue
+              }
+              pushTexturedBoxFace(
+                getOrCreateLayerBuffer(boxBuffers, layer, encodeMaterialKey(texture, textureBlock.emitsLight)),
+                x,
+                y,
+                z,
+                faceIndex,
+                box,
+              )
+            }
           }
           continue
         }
@@ -337,38 +582,46 @@ export const buildChunkMesh = (
           if (!texture) {
             continue
           }
-          pushTexturedFace(getOrCreateLayerBuffer(buffers, layer, texture), x, y, z, faceIndex)
+          pushTexturedFace(
+            getOrCreateLayerBuffer(buffers, layer, encodeMaterialKey(texture, textureBlock.emitsLight)),
+            x,
+            y,
+            z,
+            faceIndex,
+          )
         }
       }
     }
   }
 
   const solid = Array.from(buffers.solid.entries())
-    .map(([texture, layerBuffers]) =>
-      createMeshFromBuffers(
+    .map(([materialKey, layerBuffers]) => {
+      const { texture, emitsLight } = decodeMaterialKey(materialKey)
+      return createMeshFromBuffers(
         scene,
         `chunk-solid-${sanitizeTextureKey(texture)}-${chunk.coord.x}-${chunk.coord.z}`,
         originX,
         originZ,
-        materials.solid(texture),
+        materials.solid(texture, emitsLight),
         layerBuffers,
         0,
-      ),
-    )
+      )
+    })
     .filter((mesh): mesh is Mesh => Boolean(mesh))
 
   const cutout = Array.from(buffers.cutout.entries())
-    .map(([texture, layerBuffers]) =>
-      createMeshFromBuffers(
+    .map(([materialKey, layerBuffers]) => {
+      const { texture, emitsLight } = decodeMaterialKey(materialKey)
+      return createMeshFromBuffers(
         scene,
         `chunk-cutout-${sanitizeTextureKey(texture)}-${chunk.coord.x}-${chunk.coord.z}`,
         originX,
         originZ,
-        materials.cutout(texture),
+        materials.cutout(texture, emitsLight),
         layerBuffers,
         1,
-      ),
-    )
+      )
+    })
     .filter((mesh): mesh is Mesh => Boolean(mesh))
 
   const fluid = Array.from(buffers.fluid.values())

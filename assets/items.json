@@ -27,12 +27,35 @@
     "stackSize": 64,
     "texture": "/assets/textures/block/boards.png"
   },
+  "wood_stairs": {
+    "name": "Деревянные ступени",
+    "description": "Классические деревянные ступени. При установке автоматически поворачиваются по направлению взгляда.",
+    "category": "block",
+    "stackSize": 64,
+    "texture": "/assets/textures-vanilla/block/oak_planks.png",
+    "placeableBlockId": null
+  },
+  "cobblestone_stairs": {
+    "name": "Булыжные ступени",
+    "description": "Классические булыжные ступени. Подходят для стен, лестниц и крыш.",
+    "category": "block",
+    "stackSize": 64,
+    "texture": "/assets/textures-vanilla/block/cobblestone.png",
+    "placeableBlockId": null
+  },
   "stick": {
     "name": "Палка",
     "description": "Базовый материал для крафта инструментов и оружия. Крафтится из досок.",
     "category": "material",
     "stackSize": 64,
     "texture": "/assets/textures/item/stick.png"
+  },
+  "cigarette": {
+    "name": "Сигарета",
+    "description": "Кастомный косметический предмет. Игрок держит её в руке сразу после загрузки мира.",
+    "category": "item",
+    "stackSize": 16,
+    "texture": "/assets/textures/item/cigarette.png"
   },
   "iron_ingot": {
     "name": "Железный слиток",

@@ -1,6 +1,7 @@
 import { assetData, resolveAssetTexture } from './assets'
 import { humanizeId } from '../utils/math'
 import type {
+  BlockFacing,
   BlockDefinition,
   EntityDefinition,
   ItemDefinition,
@@ -9,6 +10,9 @@ import type {
 } from '../types'
 
 type RawRecord = Record<string, Record<string, unknown>>
+
+const LEGACY_BLOCK_INSERT_AFTER = 'torch'
+const LEGACY_BLOCK_IDS = ['oak_door']
 
 const rawBlocks = assetData.blocksRaw
   .split(/\r?\n/)
@@ -31,6 +35,7 @@ const inferBlockDefinition = (
     transparent: false,
     translucent: false,
     crossPlane: false,
+    shape: 'cube',
     fluid: false,
     breakTime: 0.45,
     emitsLight: 0,
@@ -61,6 +66,22 @@ const inferBlockDefinition = (
   } else if (id === 'boards') {
     block.category = 'wood'
     block.breakTime = 0.35
+  } else if (id === 'cobblestone') {
+    block.category = 'terrain'
+    block.textures = { all: 'textures-vanilla/block/cobblestone.png' }
+    block.breakTime = 0.7
+  } else if (id === 'stone_bricks') {
+    block.category = 'decorative'
+    block.textures = { all: 'textures-vanilla/block/stone_bricks.png' }
+    block.breakTime = 0.75
+  } else if (id === 'mossy_cobblestone') {
+    block.category = 'decorative'
+    block.textures = { all: 'textures-vanilla/block/mossy_cobblestone.png' }
+    block.breakTime = 0.7
+  } else if (id === 'dark_planks') {
+    block.category = 'wood'
+    block.textures = { all: 'textures-vanilla/block/dark_oak_planks.png' }
+    block.breakTime = 0.38
   } else if (id === 'leaves') {
     block.category = 'plant'
     block.transparent = true
@@ -71,6 +92,17 @@ const inferBlockDefinition = (
     block.transparent = true
     block.translucent = true
     block.breakTime = 0.2
+  } else if (id === 'bookshelf') {
+    block.category = 'decorative'
+    block.textures = {
+      top: 'textures-vanilla/block/oak_planks.png',
+      bottom: 'textures-vanilla/block/oak_planks.png',
+      front: 'textures-vanilla/block/bookshelf.png',
+      back: 'textures-vanilla/block/bookshelf.png',
+      left: 'textures-vanilla/block/bookshelf.png',
+      right: 'textures-vanilla/block/bookshelf.png',
+    }
+    block.breakTime = 0.45
   } else if (id === 'sand') {
     block.category = 'terrain'
     block.breakTime = 0.24
@@ -81,6 +113,7 @@ const inferBlockDefinition = (
     block.collidable = false
     block.solid = false
     block.crossPlane = true
+    block.shape = 'cross_plane'
     block.breakTime = 0.1
   } else if (id === 'clay' || id === 'brick') {
     block.category = 'decorative'
@@ -91,6 +124,33 @@ const inferBlockDefinition = (
     block.category = 'ore'
     block.breakTime = 0.7
     block.emitsLight = 10
+  } else if (id === 'torch') {
+    block.category = 'decorative'
+    block.textures = { all: 'textures-vanilla/block/torch.png' }
+    block.transparent = true
+    block.translucent = true
+    block.collidable = false
+    block.solid = false
+    block.shape = 'torch'
+    block.breakTime = 0.08
+    block.emitsLight = 10
+  } else if (id === 'oak_door') {
+    block.category = 'decorative'
+    block.textures = {
+      top: 'textures-vanilla/block/oak_door_top.png',
+      bottom: 'textures-vanilla/block/oak_door_top.png',
+      front: 'textures-vanilla/block/oak_door_bottom.png',
+      back: 'textures-vanilla/block/oak_door_bottom.png',
+      left: 'textures-vanilla/block/oak_door_bottom.png',
+      right: 'textures-vanilla/block/oak_door_bottom.png',
+    }
+    block.transparent = true
+    block.translucent = true
+    block.collidable = false
+    block.solid = false
+    block.itemId = 'boards'
+    block.dropItemId = 'boards'
+    block.breakTime = 0.2
   } else if (id === 'crafting_table') {
     block.category = 'utility'
     block.textures = {
@@ -125,6 +185,24 @@ const inferBlockDefinition = (
     block.fluid = true
     block.fluidLevel = id === 'water' ? 8 : parseInt(id.replace('water_', ''), 10)
     block.breakTime = 0
+  } else {
+    const stairMatch = id.match(/^(cobblestone|wood)_stairs_(north|south|east|west)$/)
+    if (stairMatch) {
+      const [, material, facing] = stairMatch as [string, 'cobblestone' | 'wood', BlockFacing]
+      block.name = material === 'cobblestone' ? 'Cobblestone Stairs' : 'Wooden Stairs'
+      block.category = material === 'cobblestone' ? 'terrain' : 'wood'
+      block.textures = {
+        all:
+          material === 'cobblestone'
+            ? 'textures-vanilla/block/cobblestone.png'
+            : 'textures-vanilla/block/oak_planks.png',
+      }
+      block.shape = 'stairs'
+      block.facing = facing
+      block.breakTime = material === 'cobblestone' ? 0.7 : 0.38
+      block.itemId = `${material}_stairs`
+      block.dropItemId = block.itemId
+    }
   }
 
   return block
@@ -133,6 +211,8 @@ const inferBlockDefinition = (
 const parseItems = (input: RawRecord): Map<string, ItemDefinition> => {
   const items = new Map<string, ItemDefinition>()
   for (const [id, raw] of Object.entries(input)) {
+    const hasExplicitPlaceableBlockId = Object.prototype.hasOwnProperty.call(raw, 'placeableBlockId')
+    const explicitPlaceableBlockId = raw.placeableBlockId
     items.set(id, {
       id,
       name: String(raw.name ?? humanizeId(id)),
@@ -142,7 +222,13 @@ const parseItems = (input: RawRecord): Map<string, ItemDefinition> => {
       durability: raw.durability === undefined ? undefined : Number(raw.durability),
       damage: raw.damage === undefined ? undefined : Number(raw.damage),
       texture: String(raw.texture ?? ''),
-      placeableBlockId: String(raw.category) === 'block' ? id : undefined,
+      placeableBlockId: hasExplicitPlaceableBlockId
+        ? explicitPlaceableBlockId == null || String(explicitPlaceableBlockId).trim() === ''
+          ? undefined
+          : String(explicitPlaceableBlockId)
+        : String(raw.category) === 'block'
+          ? id
+          : undefined,
     })
   }
   return items
@@ -219,17 +305,27 @@ export const buildRegistries = (): RegistryBundle => {
   const entities = parseEntities(assetData.entitiesData)
   const recipes = parseRecipes(assetData.recipesData)
 
-  const blockIds = new Set<string>(rawBlocks)
-  for (const item of items.values()) {
-    if (item.placeableBlockId) {
-      blockIds.add(item.placeableBlockId)
+  const blockIds = [...rawBlocks]
+  const pushUniqueBlockId = (id: string): void => {
+    if (!blockIds.includes(id)) {
+      blockIds.push(id)
     }
   }
-  blockIds.add('water')
-  for (let i = 1; i <= 7; i++) {
-    blockIds.add(`water_${i}`)
+  if (!blockIds.includes('oak_door')) {
+    const legacyInsertIndex = blockIds.indexOf(LEGACY_BLOCK_INSERT_AFTER)
+    const insertAt = legacyInsertIndex >= 0 ? legacyInsertIndex + 1 : blockIds.length
+    blockIds.splice(insertAt, 0, ...LEGACY_BLOCK_IDS.filter((id) => !blockIds.includes(id)))
   }
-  blockIds.add('dirt')
+  for (const item of items.values()) {
+    if (item.placeableBlockId) {
+      pushUniqueBlockId(item.placeableBlockId)
+    }
+  }
+  pushUniqueBlockId('water')
+  for (let i = 1; i <= 7; i++) {
+    pushUniqueBlockId(`water_${i}`)
+  }
+  pushUniqueBlockId('dirt')
 
   const blocks = new Map<string, BlockDefinition>()
   const blocksByCode = new Map<number, BlockDefinition>()
@@ -237,7 +333,7 @@ export const buildRegistries = (): RegistryBundle => {
   const blockCodes: Record<string, number> = {}
 
   let nextCode = 1
-  for (const blockId of Array.from(blockIds)) {
+  for (const blockId of blockIds) {
     const code = nextCode
     nextCode += 1
     const block = inferBlockDefinition(blockId, code, items.get(blockId)?.name)
