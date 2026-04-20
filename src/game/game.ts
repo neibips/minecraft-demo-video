@@ -851,6 +851,11 @@ export class Minecraft2Game {
     }
 
     if (this.player.consumeSecondaryPress()) {
+      const heldSlot = this.getSelectedHotbarSlot()
+      if (heldSlot?.itemId === CIGARETTE_ITEM_ID) {
+        this.player.tryStartSmoking()
+        return
+      }
       if (!hit) {
         return
       }

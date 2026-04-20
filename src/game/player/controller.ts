@@ -6,7 +6,7 @@ import {
   UniversalCamera,
   Vector3,
 } from '@babylonjs/core'
-import type { Mesh, Scene } from '@babylonjs/core'
+import type { Mesh, ParticleSystem, Scene } from '@babylonjs/core'
 import {
   GRAVITY,
   JUMP_VELOCITY,
@@ -24,11 +24,48 @@ import {
   createHeldBlockMaterial,
   createHeldItemMaterial,
 } from '../render/itemMesh'
+import {
+  buildCigaretteModel,
+  buildLighterModel,
+  createLighterFlameParticleSystem,
+  createSmokeParticleSystem,
+  type CigaretteModel,
+  type LighterModel,
+} from '../render/handProps'
 import type { BlockAtlas, BlockDefinition, ItemDefinition, PlayerSave } from '../types'
 import { clamp } from '../utils/math'
 import { WorldManager } from '../world/worldManager'
 
 type HeldKind = 'block' | 'tool' | 'sword' | 'gun' | 'item' | 'cigarette'
+
+const CIGARETTE_SCALE = 0.24
+const CIGARETTE_BASE_POSITION = new Vector3(-0.18, 0.22, 0.16)
+const CIGARETTE_BASE_ROTATION = new Vector3(1.25, 0.3, 0.25)
+const CIGARETTE_LIGHTING_POSITION = new Vector3(-0.32, -0.05, 0.3)
+const CIGARETTE_LIGHTING_ROTATION = new Vector3(1.4, 0.08, 0.05)
+const CIGARETTE_MOUTH_POSITION = new Vector3(-0.12, 0.04, 0.08)
+const CIGARETTE_MOUTH_ROTATION = new Vector3(0.5, 0.2, 0.15)
+
+const RIGHT_HAND_BASE_X = 0.38
+const RIGHT_HAND_BASE_Y = -0.42
+const RIGHT_HAND_BASE_Z = 0.78
+const RIGHT_HAND_MOUTH_OFFSET_X = -0.3
+const RIGHT_HAND_MOUTH_OFFSET_Y = 0.34
+const RIGHT_HAND_MOUTH_OFFSET_Z = -0.48
+
+const LEFT_HAND_BASE_POSITION = new Vector3(-0.38, -0.9, 0.6)
+const LEFT_HAND_RAISED_POSITION = new Vector3(-0.1, -0.2, 0.62)
+const LEFT_HAND_BASE_ROTATION = new Vector3(0.3, 0.25, 0.2)
+const LEFT_HAND_RAISED_ROTATION = new Vector3(0.45, -0.5, -0.65)
+
+const SMOKING_PHASE_LIGHTER_RISE = 0.65
+const SMOKING_PHASE_FLAME_START = 0.45
+const SMOKING_PHASE_FLAME_END = 1.35
+const SMOKING_PHASE_LIGHTER_FALL = 2.0
+const SMOKING_PHASE_MOUTH_RAISE_END = 2.75
+const SMOKING_PHASE_SMOKE_HOLD_END = 5.4
+const SMOKING_PHASE_RETURN_END = 6.3
+const SMOKE_PARTICLES_FADE_OUT = 1.1
 
 interface HeldTransform {
   position: Vector3
@@ -66,9 +103,9 @@ const HELD_PRESETS: Record<HeldKind, HeldTransform> = {
     scale: 0.5,
   },
   cigarette: {
-    position: new Vector3(0.17, 0.04, 0.16),
-    rotation: new Vector3(-0.18, -0.72, 1.22),
-    scale: 0.28,
+    position: CIGARETTE_BASE_POSITION.clone(),
+    rotation: CIGARETTE_BASE_ROTATION.clone(),
+    scale: CIGARETTE_SCALE,
   },
 }
 
@@ -93,6 +130,8 @@ export class PlayerController {
   private readonly keys = new Set<string>()
   private readonly handRoot: TransformNode
   private readonly heldMount: TransformNode
+  private readonly leftHandRoot: TransformNode
+  private readonly leftArmMesh: Mesh
   private readonly armMesh
   private readonly armMaterial: StandardMaterial
   private readonly heldMaterials = new Map<string, StandardMaterial>()
@@ -110,6 +149,13 @@ export class PlayerController {
   private lastGroundY = 0
   private mouseSensitivity = 0.0024
   private currentHeight = PLAYER_HEIGHT
+  private cigaretteModel: CigaretteModel | null = null
+  private lighterModel: LighterModel | null = null
+  private smokeParticles: ParticleSystem | null = null
+  private lighterFlameParticles: ParticleSystem | null = null
+  private smokingTime = -1
+  private cigaretteActive = false
+  private smokingMouthRaise = 0
 
   constructor(
     scene: Scene,
@@ -150,6 +196,23 @@ export class PlayerController {
     this.armMesh.position.set(-0.08, -0.05, 0.06)
     this.armMesh.rotation.set(0.2, 0.2, 0.2)
 
+    this.leftHandRoot = new TransformNode('left-hand-root', scene)
+    this.leftHandRoot.parent = this.camera
+    this.leftHandRoot.position.copyFrom(LEFT_HAND_BASE_POSITION)
+    this.leftHandRoot.rotation.copyFrom(LEFT_HAND_BASE_ROTATION)
+    this.leftHandRoot.setEnabled(false)
+
+    this.leftArmMesh = MeshBuilder.CreateBox(
+      'player-left-arm',
+      { width: 0.18, height: 0.5, depth: 0.18 },
+      scene,
+    )
+    this.leftArmMesh.parent = this.leftHandRoot
+    this.leftArmMesh.material = this.armMaterial
+    this.leftArmMesh.position.set(0.08, -0.05, 0.06)
+    this.leftArmMesh.rotation.set(0.2, -0.2, -0.2)
+    this.leftArmMesh.isPickable = false
+
     this.registerEvents()
   }
 
@@ -173,6 +236,7 @@ export class PlayerController {
     this.canvas.removeEventListener('contextmenu', this.handleContextMenu)
     this.camera.dispose()
     this.armMesh.dispose()
+    this.leftArmMesh.dispose()
     for (const mesh of this.heldMeshes.values()) {
       mesh.dispose()
     }
@@ -181,7 +245,16 @@ export class PlayerController {
       material.dispose()
     }
     this.heldMaterials.clear()
+    this.smokeParticles?.dispose()
+    this.smokeParticles = null
+    this.lighterFlameParticles?.dispose()
+    this.lighterFlameParticles = null
+    this.lighterModel?.dispose()
+    this.lighterModel = null
+    this.cigaretteModel?.dispose()
+    this.cigaretteModel = null
     this.heldMount.dispose()
+    this.leftHandRoot.dispose()
     this.handRoot.dispose()
     this.armMaterial.dispose()
   }
@@ -305,18 +378,33 @@ export class PlayerController {
   setHeldItem(itemId: string | null): void {
     if (!itemId) {
       this.currentHeldKey = null
+      this.deactivateCigarette()
       this.showHeldMesh(null, HELD_PRESETS.item)
       return
     }
     const item = this.itemLookup?.(itemId) ?? null
     if (!item || !item.texture) {
       this.currentHeldKey = null
+      this.deactivateCigarette()
       this.showHeldMesh(null, HELD_PRESETS.item)
       return
     }
 
     const block = item.placeableBlockId ? this.blockLookup?.(item.placeableBlockId) : undefined
     const kind = this.resolveHeldKind(item, block)
+
+    if (kind === 'cigarette') {
+      if (this.heldVisibleMesh) {
+        this.heldVisibleMesh.isVisible = false
+        this.heldVisibleMesh = null
+      }
+      this.currentHeldKey = `cigarette:${item.id}`
+      this.activateCigarette()
+      return
+    }
+
+    this.deactivateCigarette()
+
     const cacheKey = kind === 'block' ? `block:${item.placeableBlockId ?? item.id}` : `item:${item.id}`
     if (cacheKey === this.currentHeldKey && this.heldVisibleMesh) {
       return
@@ -519,16 +607,265 @@ export class PlayerController {
       ? Math.sin(performance.now() * 0.008) * 0.02
       : 0
 
+    if (this.smokingTime >= 0) {
+      this.updateSmokingAnimation(deltaSeconds)
+    } else {
+      this.smokingMouthRaise = 0
+    }
+
+    const raise = this.smokingMouthRaise
+    const raiseEase = raise * raise * (3 - 2 * raise)
+
     this.handRoot.position.set(
-      0.38 + walkBob,
-      -0.42 - Math.sin(swingPhase * Math.PI) * 0.12,
-      0.78 - Math.sin(swingPhase * Math.PI) * 0.18,
+      RIGHT_HAND_BASE_X + walkBob * (1 - raiseEase) + RIGHT_HAND_MOUTH_OFFSET_X * raiseEase,
+      RIGHT_HAND_BASE_Y - Math.sin(swingPhase * Math.PI) * 0.12 + RIGHT_HAND_MOUTH_OFFSET_Y * raiseEase,
+      RIGHT_HAND_BASE_Z - Math.sin(swingPhase * Math.PI) * 0.18 + RIGHT_HAND_MOUTH_OFFSET_Z * raiseEase,
     )
     this.handRoot.rotation.set(
-      0.2 + Math.sin(swingPhase * Math.PI) * 0.8,
-      -0.2 - Math.sin(swingPhase * Math.PI) * 0.2,
-      -Math.sin(swingPhase * Math.PI) * 0.35,
+      0.2 + Math.sin(swingPhase * Math.PI) * 0.8 - 0.25 * raiseEase,
+      -0.2 - Math.sin(swingPhase * Math.PI) * 0.2 + 0.1 * raiseEase,
+      -Math.sin(swingPhase * Math.PI) * 0.35 - 0.1 * raiseEase,
     )
+  }
+
+  isSmoking(): boolean {
+    return this.smokingTime >= 0
+  }
+
+  tryStartSmoking(): boolean {
+    if (!this.cigaretteActive) return false
+    if (this.smokingTime >= 0) return false
+    this.ensureSmokingProps()
+    this.smokingTime = 0
+    this.leftHandRoot.setEnabled(true)
+    this.leftHandRoot.position.copyFrom(LEFT_HAND_BASE_POSITION)
+    this.leftHandRoot.rotation.copyFrom(LEFT_HAND_BASE_ROTATION)
+    if (this.lighterModel) {
+      this.lighterModel.flameMesh.isVisible = false
+      this.lighterModel.flameMesh.scaling.set(1, 1, 1)
+    }
+    return true
+  }
+
+  private ensureCigaretteModel(): CigaretteModel {
+    if (this.cigaretteModel) return this.cigaretteModel
+    const model = buildCigaretteModel(this.scene, 'held-cigarette')
+    model.root.parent = this.heldMount
+    model.root.position.copyFrom(CIGARETTE_BASE_POSITION)
+    model.root.rotation.copyFrom(CIGARETTE_BASE_ROTATION)
+    model.root.scaling.setAll(CIGARETTE_SCALE)
+    model.root.setEnabled(false)
+    this.cigaretteModel = model
+    return model
+  }
+
+  private ensureSmokingProps(): void {
+    const cig = this.ensureCigaretteModel()
+    if (!this.lighterModel) {
+      const lighter = buildLighterModel(this.scene, 'held-lighter')
+      lighter.root.parent = this.leftHandRoot
+      lighter.root.position.set(-0.04, 0.08, 0.05)
+      lighter.root.rotation.set(-0.25, 0.1, -0.15)
+      lighter.root.scaling.setAll(0.6)
+      this.lighterModel = lighter
+    }
+    if (!this.smokeParticles) {
+      this.smokeParticles = createSmokeParticleSystem(this.scene, cig.tipAnchor)
+    }
+    if (!this.lighterFlameParticles && this.lighterModel) {
+      this.lighterFlameParticles = createLighterFlameParticleSystem(
+        this.scene,
+        this.lighterModel.flameAnchor,
+      )
+    }
+  }
+
+  private activateCigarette(): void {
+    const cig = this.ensureCigaretteModel()
+    this.cigaretteActive = true
+    cig.root.setEnabled(true)
+    if (this.smokingTime < 0) {
+      cig.root.position.copyFrom(CIGARETTE_BASE_POSITION)
+      cig.root.rotation.copyFrom(CIGARETTE_BASE_ROTATION)
+      cig.root.scaling.setAll(CIGARETTE_SCALE)
+      cig.emberMaterial.emissiveColor.set(0.08, 0.06, 0.04)
+      cig.emberMaterial.diffuseColor.set(0.1, 0.08, 0.06)
+    }
+  }
+
+  private deactivateCigarette(): void {
+    if (!this.cigaretteActive) return
+    this.cigaretteActive = false
+    this.stopSmoking()
+    this.cigaretteModel?.root.setEnabled(false)
+  }
+
+  private stopSmoking(): void {
+    if (this.smokingTime < 0) return
+    this.smokingTime = -1
+    this.smokingMouthRaise = 0
+    this.leftHandRoot.setEnabled(false)
+    this.leftHandRoot.position.copyFrom(LEFT_HAND_BASE_POSITION)
+    this.leftHandRoot.rotation.copyFrom(LEFT_HAND_BASE_ROTATION)
+    if (this.lighterModel) {
+      this.lighterModel.flameMesh.isVisible = false
+    }
+    this.smokeParticles?.stop()
+    this.lighterFlameParticles?.stop()
+    if (this.cigaretteModel) {
+      this.cigaretteModel.root.position.copyFrom(CIGARETTE_BASE_POSITION)
+      this.cigaretteModel.root.rotation.copyFrom(CIGARETTE_BASE_ROTATION)
+      this.cigaretteModel.emberMaterial.emissiveColor.set(0.08, 0.06, 0.04)
+      this.cigaretteModel.emberMaterial.diffuseColor.set(0.1, 0.08, 0.06)
+    }
+  }
+
+  private smoothstep(a: number, b: number, x: number): number {
+    if (b <= a) return x < a ? 0 : 1
+    const t = clamp((x - a) / (b - a), 0, 1)
+    return t * t * (3 - 2 * t)
+  }
+
+  private updateSmokingAnimation(deltaSeconds: number): void {
+    if (!this.cigaretteModel) return
+    this.smokingTime += deltaSeconds
+    const t = this.smokingTime
+
+    // Right-hand raise factor: stays 0 until the lighter withdraws, ramps to 1 as
+    // the cigarette is brought to the mouth, held during the smoke phase, then
+    // eases back to 0 during return.
+    if (t < SMOKING_PHASE_LIGHTER_FALL) {
+      this.smokingMouthRaise = 0
+    } else if (t < SMOKING_PHASE_MOUTH_RAISE_END) {
+      this.smokingMouthRaise = this.smoothstep(
+        SMOKING_PHASE_LIGHTER_FALL,
+        SMOKING_PHASE_MOUTH_RAISE_END,
+        t,
+      )
+    } else if (t < SMOKING_PHASE_SMOKE_HOLD_END) {
+      this.smokingMouthRaise = 1
+    } else if (t < SMOKING_PHASE_RETURN_END) {
+      this.smokingMouthRaise =
+        1 - this.smoothstep(SMOKING_PHASE_SMOKE_HOLD_END, SMOKING_PHASE_RETURN_END, t)
+    } else {
+      this.smokingMouthRaise = 0
+    }
+
+    // Left hand / lighter trajectory.
+    let leftPhase = 0
+    if (t < SMOKING_PHASE_LIGHTER_RISE) {
+      leftPhase = this.smoothstep(0, SMOKING_PHASE_LIGHTER_RISE, t)
+    } else if (t < SMOKING_PHASE_LIGHTER_FALL) {
+      leftPhase = 1
+    } else if (t < SMOKING_PHASE_MOUTH_RAISE_END) {
+      leftPhase = 1 - this.smoothstep(SMOKING_PHASE_LIGHTER_FALL, SMOKING_PHASE_MOUTH_RAISE_END, t)
+    } else {
+      leftPhase = 0
+    }
+    Vector3.LerpToRef(
+      LEFT_HAND_BASE_POSITION,
+      LEFT_HAND_RAISED_POSITION,
+      leftPhase,
+      this.leftHandRoot.position,
+    )
+    Vector3.LerpToRef(
+      LEFT_HAND_BASE_ROTATION,
+      LEFT_HAND_RAISED_ROTATION,
+      leftPhase,
+      this.leftHandRoot.rotation,
+    )
+
+    // Cigarette trajectory: base -> lighting -> mouth -> base.
+    const cigRoot = this.cigaretteModel.root
+    if (t < SMOKING_PHASE_LIGHTER_RISE) {
+      const f = this.smoothstep(0, SMOKING_PHASE_LIGHTER_RISE, t)
+      Vector3.LerpToRef(CIGARETTE_BASE_POSITION, CIGARETTE_LIGHTING_POSITION, f, cigRoot.position)
+      Vector3.LerpToRef(CIGARETTE_BASE_ROTATION, CIGARETTE_LIGHTING_ROTATION, f, cigRoot.rotation)
+    } else if (t < SMOKING_PHASE_LIGHTER_FALL) {
+      cigRoot.position.copyFrom(CIGARETTE_LIGHTING_POSITION)
+      cigRoot.rotation.copyFrom(CIGARETTE_LIGHTING_ROTATION)
+    } else if (t < SMOKING_PHASE_MOUTH_RAISE_END) {
+      const f = this.smoothstep(SMOKING_PHASE_LIGHTER_FALL, SMOKING_PHASE_MOUTH_RAISE_END, t)
+      Vector3.LerpToRef(
+        CIGARETTE_LIGHTING_POSITION,
+        CIGARETTE_MOUTH_POSITION,
+        f,
+        cigRoot.position,
+      )
+      Vector3.LerpToRef(
+        CIGARETTE_LIGHTING_ROTATION,
+        CIGARETTE_MOUTH_ROTATION,
+        f,
+        cigRoot.rotation,
+      )
+    } else if (t < SMOKING_PHASE_SMOKE_HOLD_END) {
+      cigRoot.position.copyFrom(CIGARETTE_MOUTH_POSITION)
+      cigRoot.position.y += Math.sin(t * 2.4) * 0.006
+      cigRoot.rotation.copyFrom(CIGARETTE_MOUTH_ROTATION)
+    } else if (t < SMOKING_PHASE_RETURN_END) {
+      const f = this.smoothstep(SMOKING_PHASE_SMOKE_HOLD_END, SMOKING_PHASE_RETURN_END, t)
+      Vector3.LerpToRef(CIGARETTE_MOUTH_POSITION, CIGARETTE_BASE_POSITION, f, cigRoot.position)
+      Vector3.LerpToRef(CIGARETTE_MOUTH_ROTATION, CIGARETTE_BASE_ROTATION, f, cigRoot.rotation)
+    } else {
+      this.stopSmoking()
+      return
+    }
+
+    // Lighter flame visibility and particles.
+    if (this.lighterModel) {
+      const flameActive = t >= SMOKING_PHASE_FLAME_START && t < SMOKING_PHASE_FLAME_END
+      this.lighterModel.flameMesh.isVisible = flameActive
+      if (flameActive) {
+        const flicker = 0.8 + Math.sin(t * 45) * 0.12 + Math.random() * 0.12
+        this.lighterModel.flameMesh.scaling.set(1, flicker, 1)
+        if (this.lighterFlameParticles && !this.lighterFlameParticles.isStarted()) {
+          this.lighterFlameParticles.start()
+        }
+      } else if (this.lighterFlameParticles?.isStarted()) {
+        this.lighterFlameParticles.stop()
+      }
+    }
+
+    // Ember glow.
+    const emberMat = this.cigaretteModel.emberMaterial
+    let emberIntensity = 0
+    if (t < SMOKING_PHASE_FLAME_START) {
+      emberIntensity = 0
+    } else if (t < SMOKING_PHASE_FLAME_END) {
+      emberIntensity = this.smoothstep(SMOKING_PHASE_FLAME_START, SMOKING_PHASE_FLAME_END, t)
+    } else if (t < SMOKING_PHASE_RETURN_END - 0.2) {
+      emberIntensity = 0.85 + Math.sin(t * 3) * 0.12 + Math.random() * 0.06
+    } else {
+      const f = this.smoothstep(SMOKING_PHASE_RETURN_END - 0.2, SMOKING_PHASE_RETURN_END, t)
+      emberIntensity = (0.85 + Math.sin(t * 3) * 0.1) * (1 - f)
+    }
+    emberIntensity = Math.max(0, emberIntensity)
+    emberMat.emissiveColor.set(
+      Math.min(2, 1.6 * emberIntensity),
+      Math.min(1, 0.4 * emberIntensity),
+      Math.min(0.6, 0.1 * emberIntensity),
+    )
+    emberMat.diffuseColor.set(
+      Math.min(0.7, 0.5 * emberIntensity + 0.08),
+      Math.min(0.3, 0.2 * emberIntensity + 0.06),
+      Math.min(0.15, 0.05 * emberIntensity + 0.04),
+    )
+
+    // Smoke emission after ignition.
+    if (this.smokeParticles) {
+      const smokeStart = SMOKING_PHASE_FLAME_END - 0.2
+      const smokeStop = SMOKING_PHASE_RETURN_END - 0.1
+      if (t >= smokeStart && t < smokeStop) {
+        if (!this.smokeParticles.isStarted()) this.smokeParticles.start()
+        const puff = (t - smokeStart) % 1.2
+        this.smokeParticles.emitRate = puff < 0.3 ? 90 : 42
+      } else if (t >= smokeStop && this.smokeParticles.isStarted()) {
+        this.smokeParticles.stop()
+      }
+      if (t >= SMOKING_PHASE_RETURN_END + SMOKE_PARTICLES_FADE_OUT) {
+        this.smokeParticles.stop()
+      }
+    }
   }
 
   private syncCamera(eyeHeight = PLAYER_EYE_HEIGHT): void {
