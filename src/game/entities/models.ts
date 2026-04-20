@@ -379,7 +379,12 @@ export const createEntityVisual = (
       { name: 'arm_right', size: new Vector3(0.35, 1.1, 0.35), pos: new Vector3(-0.95, 2.1, 0.1) },
       { name: 'leg_left', size: new Vector3(0.45, 1.4, 0.45), pos: new Vector3(0.35, 0.7, 0.05) },
       { name: 'leg_right', size: new Vector3(0.45, 1.4, 0.45), pos: new Vector3(-0.35, 0.7, 0.05) },
-      { name: 'tail', size: new Vector3(0.5, 0.5, 1.6), pos: new Vector3(0, 1.9, -1.1) },
+      {
+        name: 'tail',
+        size: new Vector3(0.55, 0.55, 2.8),
+        pos: new Vector3(0, 1.8, 0.35),
+        meshOffset: new Vector3(0, 0, 1.4),
+      },
     ]
     for (const part of parts) {
       const pivot = new TransformNode(`godzilla-${part.name}`, scene)
@@ -391,6 +396,9 @@ export const createEntityVisual = (
         scene,
       )
       mesh.parent = pivot
+      if ('meshOffset' in part && part.meshOffset) {
+        mesh.position.copyFrom(part.meshOffset)
+      }
       mesh.material = material
       mesh.renderingGroupId = 0
       pivots.set(part.name, pivot)
