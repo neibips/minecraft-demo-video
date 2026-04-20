@@ -6,6 +6,7 @@ import {
   Constants,
   DefaultRenderingPipeline,
   DirectionalLight,
+  DynamicTexture,
   HemisphericLight,
   ImageProcessingConfiguration,
   Mesh,
@@ -13,6 +14,7 @@ import {
   Scene,
   ShadowGenerator,
   StandardMaterial,
+  Texture,
   TransformNode,
   Vector3,
 } from '@babylonjs/core'
@@ -21,6 +23,11 @@ import { SkyMaterial } from '@babylonjs/materials/sky/skyMaterial'
 
 const CELESTIAL_DISTANCE = 360
 const SKYBOX_SIZE = 2200
+const CLOUD_ALTITUDE = 140
+const CLOUD_PLANE_SIZE = 2000
+const CLOUD_TEX_SIZE = 128
+const CLOUD_TILE_COUNT = 6
+const CLOUD_DRIFT_SPEED = 0.008
 const SHADOW_MAP_SIZE = 1024
 const SHADOW_DISTANCE_SUN = 60
 const SHADOW_DISTANCE_DAY = 72
@@ -70,9 +77,13 @@ export class LightingManager {
   private readonly sunMaterial: StandardMaterial
   private readonly moonMesh: Mesh
   private readonly moonMaterial: StandardMaterial
+  private readonly cloudMesh: Mesh
+  private readonly cloudMaterial: StandardMaterial
+  private readonly cloudTexture: DynamicTexture
   private readonly shadowCasters = new Set<AbstractMesh>()
   private pipeline: DefaultRenderingPipeline | null = null
   private lastSunY = 1
+  private cloudOffset = 0
   private activeShadowLight: DirectionalLight
 
   constructor(scene: Scene) {
@@ -172,6 +183,89 @@ export class LightingManager {
     this.moonMesh.applyFog = false
     this.moonMesh.billboardMode = Mesh.BILLBOARDMODE_ALL
     this.moonMesh.renderingGroupId = 0
+
+    this.cloudTexture = new DynamicTexture(
+      'cloud-texture',
+      { width: CLOUD_TEX_SIZE, height: CLOUD_TEX_SIZE },
+      scene,
+      false,
+      Texture.NEAREST_NEAREST,
+    )
+    this.cloudTexture.hasAlpha = true
+    this.cloudTexture.wrapU = Texture.WRAP_ADDRESSMODE
+    this.cloudTexture.wrapV = Texture.WRAP_ADDRESSMODE
+    this.cloudTexture.uScale = CLOUD_TILE_COUNT
+    this.cloudTexture.vScale = CLOUD_TILE_COUNT
+    this.paintCloudTexture()
+
+    this.cloudMaterial = new StandardMaterial('cloud-material', scene)
+    this.cloudMaterial.diffuseTexture = this.cloudTexture
+    this.cloudMaterial.diffuseColor = Color3.White()
+    this.cloudMaterial.emissiveColor = new Color3(0.9, 0.92, 0.95)
+    this.cloudMaterial.specularColor = Color3.Black()
+    this.cloudMaterial.backFaceCulling = false
+    this.cloudMaterial.disableLighting = true
+    this.cloudMaterial.useAlphaFromDiffuseTexture = true
+    this.cloudMaterial.alpha = 0.98
+
+    this.cloudMesh = MeshBuilder.CreatePlane(
+      'cloud-layer',
+      { size: CLOUD_PLANE_SIZE, sideOrientation: Mesh.DOUBLESIDE },
+      scene,
+    )
+    this.cloudMesh.rotation.x = Math.PI / 2
+    this.cloudMesh.position.y = CLOUD_ALTITUDE
+    this.cloudMesh.material = this.cloudMaterial
+    this.cloudMesh.isPickable = false
+    this.cloudMesh.applyFog = true
+    this.cloudMesh.renderingGroupId = 0
+    this.cloudMesh.alphaIndex = 1
+  }
+
+  private paintCloudTexture(): void {
+    const ctx = this.cloudTexture.getContext() as CanvasRenderingContext2D
+    const image = ctx.createImageData(CLOUD_TEX_SIZE, CLOUD_TEX_SIZE)
+    const hash = (ix: number, iy: number): number => {
+      const s = Math.sin(ix * 127.1 + iy * 311.7) * 43758.5453
+      return s - Math.floor(s)
+    }
+    const smooth = (x: number, y: number): number => {
+      const ix = Math.floor(x)
+      const iy = Math.floor(y)
+      const fx = x - ix
+      const fy = y - iy
+      const ux = fx * fx * (3 - 2 * fx)
+      const uy = fy * fy * (3 - 2 * fy)
+      const a = hash(ix, iy)
+      const b = hash(ix + 1, iy)
+      const c = hash(ix, iy + 1)
+      const d = hash(ix + 1, iy + 1)
+      return a * (1 - ux) * (1 - uy) + b * ux * (1 - uy) + c * (1 - ux) * uy + d * ux * uy
+    }
+    for (let y = 0; y < CLOUD_TEX_SIZE; y += 1) {
+      for (let x = 0; x < CLOUD_TEX_SIZE; x += 1) {
+        const nx = (x / CLOUD_TEX_SIZE) * 4
+        const ny = (y / CLOUD_TEX_SIZE) * 4
+        const value =
+          smooth(nx, ny) * 0.55 +
+          smooth(nx * 2.1, ny * 2.1) * 0.3 +
+          smooth(nx * 4.3, ny * 4.3) * 0.15
+        // Blocky voxel-cloud feel: threshold into solid / soft-edge / empty.
+        let alpha = 0
+        if (value > 0.62) {
+          alpha = 235
+        } else if (value > 0.55) {
+          alpha = 150
+        }
+        const idx = (y * CLOUD_TEX_SIZE + x) * 4
+        image.data[idx] = 255
+        image.data[idx + 1] = 255
+        image.data[idx + 2] = 255
+        image.data[idx + 3] = alpha
+      }
+    }
+    ctx.putImageData(image, 0, 0)
+    this.cloudTexture.update()
   }
 
   setupPostProcessing(camera: Camera): void {
@@ -406,6 +500,20 @@ export class LightingManager {
     this.sunMesh.isVisible = sunY > -0.18
     this.moonMesh.isVisible = sunY < 0.18
 
+    const frameDelta = Math.min(0.1, this.scene.getEngine().getDeltaTime() / 1000)
+    this.cloudOffset = (this.cloudOffset + frameDelta * CLOUD_DRIFT_SPEED) % 1
+    this.cloudTexture.uOffset = this.cloudOffset
+    this.cloudTexture.vOffset = this.cloudOffset * 0.35
+    this.cloudMesh.position.x = follow.x
+    this.cloudMesh.position.z = follow.z
+    const cloudBrightness = lerpScalar(0.18, 0.95, dayFactor) + twilightFactor * 0.2
+    this.cloudMaterial.emissiveColor.set(
+      cloudBrightness,
+      cloudBrightness * (0.95 + twilightFactor * 0.05),
+      cloudBrightness * (0.96 - twilightFactor * 0.15),
+    )
+    this.cloudMaterial.alpha = lerpScalar(0.72, 0.95, dayFactor)
+
     this.updatePostProcessing(dayFactor, twilightFactor, nightFactor)
     this.lastSunY = sunY
   }
@@ -425,6 +533,9 @@ export class LightingManager {
     this.moonMesh.dispose()
     this.sunMaterial.dispose()
     this.moonMaterial.dispose()
+    this.cloudMesh.dispose()
+    this.cloudMaterial.dispose()
+    this.cloudTexture.dispose()
     this.skybox.dispose()
     this.skyMaterial.dispose()
     this.celestialRoot.dispose()
