@@ -31,6 +31,8 @@ export const MOB_MAX_PER_CHUNK_RING = 12
 export const DAY_LENGTH_SECONDS = 240
 export const DEFAULT_RENDER_DISTANCE = 4
 export const DEFAULT_MOUSE_SENSITIVITY = 0.0024
+export const DEFAULT_ATMOSPHERE_VOLUME = 0.55
+export const DEFAULT_EFFECTS_VOLUME = 0.75
 export const BLOCK_FACE_EPSILON = 0.001
 
 export const FUEL_BURN_TIMES: Record<string, number> = {

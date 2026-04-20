@@ -100,6 +100,8 @@ export class GameUiController {
   private readonly seedInput: HTMLInputElement
   private readonly renderDistanceInput: HTMLInputElement
   private readonly sensitivityInput: HTMLInputElement
+  private readonly atmosphereVolumeInput: HTMLInputElement
+  private readonly effectsVolumeInput: HTMLInputElement
 
   constructor(root: HTMLElement, callbacks: UiCallbacks) {
     this.root = root
@@ -131,6 +133,14 @@ export class GameUiController {
               <label class="field">
                 <span>Mouse Sensitivity</span>
                 <input class="sensitivity-input" type="range" min="0.0012" max="0.0045" step="0.0001" />
+              </label>
+              <label class="field">
+                <span>Atmosphere Volume</span>
+                <input class="atmosphere-volume-input" type="range" min="0" max="1" step="0.01" />
+              </label>
+              <label class="field">
+                <span>Effects Volume</span>
+                <input class="effects-volume-input" type="range" min="0" max="1" step="0.01" />
               </label>
             </div>
             <div class="menu-actions">
@@ -182,6 +192,8 @@ export class GameUiController {
     this.seedInput = root.querySelector('.seed-input') as HTMLInputElement
     this.renderDistanceInput = root.querySelector('.render-distance-input') as HTMLInputElement
     this.sensitivityInput = root.querySelector('.sensitivity-input') as HTMLInputElement
+    this.atmosphereVolumeInput = root.querySelector('.atmosphere-volume-input') as HTMLInputElement
+    this.effectsVolumeInput = root.querySelector('.effects-volume-input') as HTMLInputElement
 
     root.querySelector('.create-world')?.addEventListener('click', () => {
       callbacks.createWorld(this.seedInput.value.trim())
@@ -191,18 +203,18 @@ export class GameUiController {
     root.querySelector('.save-world')?.addEventListener('click', () => callbacks.saveWorld())
     root.querySelector('.respawn-world')?.addEventListener('click', () => callbacks.respawn())
 
-    this.renderDistanceInput.addEventListener('input', () => {
+    const emitSettings = (): void => {
       callbacks.updateSettings({
         renderDistance: Number(this.renderDistanceInput.value),
         mouseSensitivity: Number(this.sensitivityInput.value),
+        atmosphereVolume: Number(this.atmosphereVolumeInput.value),
+        effectsVolume: Number(this.effectsVolumeInput.value),
       })
-    })
-    this.sensitivityInput.addEventListener('input', () => {
-      callbacks.updateSettings({
-        renderDistance: Number(this.renderDistanceInput.value),
-        mouseSensitivity: Number(this.sensitivityInput.value),
-      })
-    })
+    }
+    this.renderDistanceInput.addEventListener('input', emitSettings)
+    this.sensitivityInput.addEventListener('input', emitSettings)
+    this.atmosphereVolumeInput.addEventListener('input', emitSettings)
+    this.effectsVolumeInput.addEventListener('input', emitSettings)
 
     root.addEventListener('mousemove', this.handlePointerMove)
     root.addEventListener('mouseover', this.handlePointerOver)
@@ -277,6 +289,8 @@ export class GameUiController {
 
     this.renderDistanceInput.value = String(state.settings.renderDistance)
     this.sensitivityInput.value = String(state.settings.mouseSensitivity)
+    this.atmosphereVolumeInput.value = String(state.settings.atmosphereVolume)
+    this.effectsVolumeInput.value = String(state.settings.effectsVolume)
 
     this.renderHealth(state.health)
     this.hotbarContainer.innerHTML = renderSlotGrid(

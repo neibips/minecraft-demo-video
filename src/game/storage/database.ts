@@ -1,4 +1,10 @@
-import { DEFAULT_MOUSE_SENSITIVITY, DEFAULT_RENDER_DISTANCE, WORLD_ID } from '../config'
+import {
+  DEFAULT_ATMOSPHERE_VOLUME,
+  DEFAULT_EFFECTS_VOLUME,
+  DEFAULT_MOUSE_SENSITIVITY,
+  DEFAULT_RENDER_DISTANCE,
+  WORLD_ID,
+} from '../config'
 import type {
   ChunkCoord,
   ChunkSaveRecord,
@@ -110,13 +116,13 @@ export class WorldDatabase {
     const transaction = db.transaction(SETTINGS_STORE, 'readonly')
     const store = transaction.objectStore(SETTINGS_STORE)
     const result = await promisifyRequest(store.get('settings'))
-    const parsed = (result as SettingsSave | undefined) ?? null
-    return (
-      parsed ?? {
-        renderDistance: DEFAULT_RENDER_DISTANCE,
-        mouseSensitivity: DEFAULT_MOUSE_SENSITIVITY,
-      }
-    )
+    const parsed = (result as Partial<SettingsSave> | undefined) ?? null
+    return {
+      renderDistance: parsed?.renderDistance ?? DEFAULT_RENDER_DISTANCE,
+      mouseSensitivity: parsed?.mouseSensitivity ?? DEFAULT_MOUSE_SENSITIVITY,
+      atmosphereVolume: parsed?.atmosphereVolume ?? DEFAULT_ATMOSPHERE_VOLUME,
+      effectsVolume: parsed?.effectsVolume ?? DEFAULT_EFFECTS_VOLUME,
+    }
   }
 
   async saveSettings(settings: SettingsSave): Promise<void> {

@@ -162,6 +162,8 @@ export interface PlayerSave {
 export interface SettingsSave {
   renderDistance: number
   mouseSensitivity: number
+  atmosphereVolume: number
+  effectsVolume: number
 }
 
 export interface ChunkSaveRecord {

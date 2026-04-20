@@ -8,9 +8,12 @@ import { buildBlockAtlas } from './render/atlas'
 import { LightingManager } from './render/lighting'
 import { buildRegistries } from './data/registry'
 import { WorldDatabase } from './storage/database'
+import { AudioManager } from './audio/audio'
 import {
   AUTOSAVE_INTERVAL_MS,
   DAY_LENGTH_SECONDS,
+  DEFAULT_ATMOSPHERE_VOLUME,
+  DEFAULT_EFFECTS_VOLUME,
   DEFAULT_MOUSE_SENSITIVITY,
   DEFAULT_RENDER_DISTANCE,
   FUEL_BURN_TIMES,
@@ -56,7 +59,12 @@ export class Minecraft2Game {
   private readonly settings: SettingsSave = {
     renderDistance: DEFAULT_RENDER_DISTANCE,
     mouseSensitivity: DEFAULT_MOUSE_SENSITIVITY,
+    atmosphereVolume: DEFAULT_ATMOSPHERE_VOLUME,
+    effectsVolume: DEFAULT_EFFECTS_VOLUME,
   }
+  private readonly audio = new AudioManager()
+  private stepAccumulator = 0
+  private wasOnGround = true
 
   private atlas: Awaited<ReturnType<typeof buildBlockAtlas>> | null = null
   private worldMeta: WorldMetadata | null = null
@@ -95,8 +103,11 @@ export class Minecraft2Game {
       updateSettings: (settings) => {
         this.settings.renderDistance = settings.renderDistance
         this.settings.mouseSensitivity = settings.mouseSensitivity
+        this.settings.atmosphereVolume = settings.atmosphereVolume
+        this.settings.effectsVolume = settings.effectsVolume
         this.worldManager?.setRenderDistance(settings.renderDistance)
         this.player?.setMouseSensitivity(settings.mouseSensitivity)
+        this.audio.setVolumes(settings.atmosphereVolume, settings.effectsVolume)
         this.uiDirty = true
         void this.database.saveSettings(this.settings)
       },
@@ -136,6 +147,7 @@ export class Minecraft2Game {
   }
 
   async initialize(): Promise<void> {
+    void this.audio.initialize()
     this.atlas = await buildBlockAtlas(this.registries)
     const snapshot = await this.database.getWorldSnapshot()
     this.worldMeta = snapshot.world
@@ -143,7 +155,10 @@ export class Minecraft2Game {
     if (snapshot.settings) {
       this.settings.renderDistance = snapshot.settings.renderDistance
       this.settings.mouseSensitivity = snapshot.settings.mouseSensitivity
+      this.settings.atmosphereVolume = snapshot.settings.atmosphereVolume
+      this.settings.effectsVolume = snapshot.settings.effectsVolume
     }
+    this.audio.setVolumes(this.settings.atmosphereVolume, this.settings.effectsVolume)
     this.mode = 'menu'
     this.uiDirty = true
 
@@ -166,10 +181,22 @@ export class Minecraft2Game {
   private setMode(mode: GameMode): void {
     this.mode = mode
     this.player?.setUiCapturingInput(mode !== 'playing')
+    const inWorld =
+      mode === 'playing' ||
+      mode === 'paused' ||
+      mode === 'inventory' ||
+      mode === 'crafting_table' ||
+      mode === 'furnace'
+    if (inWorld) {
+      this.audio.startAtmosphere()
+    } else {
+      this.audio.stopAtmosphere()
+    }
     this.uiDirty = true
   }
 
   private async createWorld(seedInput: string): Promise<void> {
+    void this.audio.resume()
     const seed = seedInput || `seed-${Math.random().toString(36).slice(2, 10)}`
     this.setMode('loading')
     await this.database.clearWorld()
@@ -190,6 +217,7 @@ export class Minecraft2Game {
     if (!this.worldMeta) {
       return
     }
+    void this.audio.resume()
     this.setMode('loading')
     const playerSave = await this.database.loadPlayerState()
     await this.setupSession(playerSave)
@@ -229,6 +257,11 @@ export class Minecraft2Game {
           this.player?.damage(amount)
           if ((this.player?.health ?? 1) <= 0) {
             this.setMode('dead')
+          }
+        },
+        playMobSound: (entityId, x, y, z) => {
+          if (entityId === 'chicken' || entityId === 'spider' || entityId === 'godzilla') {
+            this.audio.playSfx(entityId, { x, y, z })
           }
         },
       },
@@ -733,6 +766,7 @@ export class Minecraft2Game {
       }
       this.machineGunCooldown = MACHINE_GUN_FIRE_INTERVAL
       this.player.triggerSwing()
+      this.audio.playSfx('swing')
       this.uiDirty = true
       return
     }
@@ -743,6 +777,7 @@ export class Minecraft2Game {
         const damage = held ? this.registries.items.get(held.itemId)?.damage ?? 1 : 1
         this.entityManager.damageMob(mob, damage, direction)
         this.player.triggerSwing()
+        this.audio.playSfx('swing')
         this.uiDirty = true
         return
       }
@@ -769,6 +804,7 @@ export class Minecraft2Game {
             direction.scale(2),
           )
           this.player.triggerSwing()
+          this.audio.playSfx('swing')
           this.breakProgress = 0
           this.breakTargetKey = ''
         }
@@ -840,6 +876,7 @@ export class Minecraft2Game {
       }
       this.syncHeldItem()
       this.player.triggerSwing()
+      this.audio.playSfx('swing')
       this.uiDirty = true
     }
   }
@@ -917,6 +954,28 @@ export class Minecraft2Game {
     this.lighting.update(this.worldTime, this.player?.position)
   }
 
+  private updatePlayerSounds(deltaSeconds: number): void {
+    if (!this.player) {
+      return
+    }
+    const horizontalSpeed = Math.hypot(this.player.velocity.x, this.player.velocity.z)
+    const walking = this.player.onGround && horizontalSpeed > 0.6 && this.mode === 'playing'
+    if (walking) {
+      this.stepAccumulator += deltaSeconds
+      const stepInterval = horizontalSpeed > 6 ? 0.3 : 0.44
+      if (this.stepAccumulator >= stepInterval) {
+        this.stepAccumulator = 0
+        this.audio.playSfx('step')
+      }
+    } else {
+      this.stepAccumulator = Math.min(this.stepAccumulator, 0.3)
+    }
+    if (!this.wasOnGround && this.player.onGround && this.mode === 'playing') {
+      this.audio.playSfx('land')
+    }
+    this.wasOnGround = this.player.onGround
+  }
+
   private async update(deltaSeconds: number): Promise<void> {
     if (!this.atlas) {
       return
@@ -926,6 +985,12 @@ export class Minecraft2Game {
       this.worldTime = (this.worldTime + deltaSeconds / DAY_LENGTH_SECONDS) % 1
       this.updateEnvironment()
       this.player.update(deltaSeconds, this.mode === 'playing')
+      this.audio.setListenerPosition(
+        this.player.position.x,
+        this.player.position.y,
+        this.player.position.z,
+      )
+      this.updatePlayerSounds(deltaSeconds)
       this.entityManager?.update(deltaSeconds, this.worldTime, this.player.position)
       this.tickFurnaces(deltaSeconds)
       if (this.worldManager) {

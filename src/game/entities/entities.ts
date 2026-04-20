@@ -24,6 +24,7 @@ interface MobRuntime {
   definition: EntityDefinition
   root: TransformNode
   pivots: Map<string, TransformNode>
+  soundTimer: number
 }
 
 interface ItemDropRuntime {
@@ -34,6 +35,7 @@ interface ItemDropRuntime {
 interface EntityCallbacks {
   giveItem: (itemId: string, count: number) => number
   damagePlayer: (amount: number) => void
+  playMobSound?: (entityId: string, x: number, y: number, z: number) => void
 }
 
 interface SurfaceNode {
@@ -181,7 +183,19 @@ export class EntityManager {
       definition,
       root: visual.root,
       pivots: visual.pivots,
+      soundTimer: this.randomMobSoundDelay(entityId, true),
     })
+  }
+
+  private randomMobSoundDelay(entityId: string, initial = false): number {
+    const ranges: Record<string, [number, number]> = {
+      chicken: [6, 16],
+      spider: [9, 22],
+      godzilla: [12, 28],
+    }
+    const [min, max] = ranges[entityId] ?? [10, 22]
+    const base = min + Math.random() * (max - min)
+    return initial ? base + Math.random() * 4 : base
   }
 
   spawnChunkHints(hints: Array<{ entityId: string; x: number; y: number; z: number }>): void {
@@ -819,6 +833,17 @@ export class EntityManager {
       mob.state.hurtTimer = Math.max(0, mob.state.hurtTimer - deltaSeconds)
       mob.state.attackCooldown = Math.max(0, (mob.state.attackCooldown ?? 0) - deltaSeconds)
       mob.state.attackTimer = Math.max(0, (mob.state.attackTimer ?? 0) - deltaSeconds)
+
+      mob.soundTimer -= deltaSeconds
+      if (mob.soundTimer <= 0) {
+        this.callbacks.playMobSound?.(
+          mob.definition.id,
+          mob.state.position.x,
+          mob.state.position.y + 0.6,
+          mob.state.position.z,
+        )
+        mob.soundTimer = this.randomMobSoundDelay(mob.definition.id)
+      }
 
       if (mob.definition.id === 'chicken' && mob.state.eggTimer !== undefined) {
         mob.state.eggTimer -= deltaSeconds
