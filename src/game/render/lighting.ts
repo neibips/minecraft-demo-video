@@ -281,7 +281,7 @@ export class LightingManager {
     this.pipeline.imageProcessingEnabled = true
     this.pipeline.imageProcessing.toneMappingEnabled = true
     this.pipeline.imageProcessing.toneMappingType = ImageProcessingConfiguration.TONEMAPPING_STANDARD
-    this.pipeline.imageProcessing.exposure = 1.15
+    this.pipeline.imageProcessing.exposure = 1.24
     this.pipeline.imageProcessing.contrast = 1.04
     this.pipeline.imageProcessing.vignetteEnabled = true
     this.pipeline.imageProcessing.vignetteWeight = 0.18
@@ -348,8 +348,8 @@ export class LightingManager {
     }
 
     this.pipeline.imageProcessing.exposure = lerpScalar(
-      0.9 + twilightFactor * 0.05,
-      1.18 + twilightFactor * 0.04,
+      0.98 + twilightFactor * 0.05,
+      1.27 + twilightFactor * 0.04,
       dayFactor,
     )
     this.pipeline.imageProcessing.contrast = lerpScalar(1.01, 1.05, dayFactor)

@@ -129,14 +129,14 @@ export class WorldManager {
       texture.vOffset = 0
       texture.level = 1
       material.diffuseTexture = texture
-      material.diffuseColor = new Color3(0.55, 0.82, 0.98)
+      material.diffuseColor = new Color3(0.18, 0.52, 0.95)
     } else {
-      material.diffuseColor = new Color3(0.44, 0.67, 0.9)
+      material.diffuseColor = new Color3(0.12, 0.42, 0.88)
     }
-    material.emissiveColor = new Color3(0.02, 0.05, 0.08)
+    material.emissiveColor = new Color3(0.02, 0.08, 0.16)
     material.ambientColor = Color3.White()
-    material.specularColor = new Color3(0.25, 0.3, 0.36)
-    material.alpha = 0.78
+    material.specularColor = new Color3(0.22, 0.32, 0.42)
+    material.alpha = 0.82
     material.backFaceCulling = false
     material.separateCullingPass = true
     material.transparencyMode = Material.MATERIAL_ALPHABLEND
