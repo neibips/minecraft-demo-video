@@ -41,22 +41,22 @@ type HeldKind = 'block' | 'tool' | 'sword' | 'gun' | 'item' | 'cigarette'
 const CIGARETTE_SCALE = 0.24
 const CIGARETTE_BASE_POSITION = new Vector3(-0.18, 0.22, 0.16)
 const CIGARETTE_BASE_ROTATION = new Vector3(1.25, 0.3, 0.25)
-const CIGARETTE_LIGHTING_POSITION = new Vector3(-0.32, -0.05, 0.3)
-const CIGARETTE_LIGHTING_ROTATION = new Vector3(1.4, 0.08, 0.05)
-const CIGARETTE_MOUTH_POSITION = new Vector3(-0.12, 0.04, 0.08)
-const CIGARETTE_MOUTH_ROTATION = new Vector3(0.5, 0.2, 0.15)
+const CIGARETTE_LIGHTING_POSITION = new Vector3(-0.2, 0.18, 0.17)
+const CIGARETTE_LIGHTING_ROTATION = new Vector3(1.35, 0.2, 0.22)
+const CIGARETTE_MOUTH_POSITION = new Vector3(-0.18, 0.22, 0.16)
+const CIGARETTE_MOUTH_ROTATION = new Vector3(1.0, 0.28, 0.24)
 
 const RIGHT_HAND_BASE_X = 0.38
 const RIGHT_HAND_BASE_Y = -0.42
 const RIGHT_HAND_BASE_Z = 0.78
-const RIGHT_HAND_MOUTH_OFFSET_X = -0.3
-const RIGHT_HAND_MOUTH_OFFSET_Y = 0.34
-const RIGHT_HAND_MOUTH_OFFSET_Z = -0.48
+const RIGHT_HAND_MOUTH_OFFSET_X = -0.05
+const RIGHT_HAND_MOUTH_OFFSET_Y = 0.08
+const RIGHT_HAND_MOUTH_OFFSET_Z = -0.16
 
 const LEFT_HAND_BASE_POSITION = new Vector3(-0.38, -0.9, 0.6)
-const LEFT_HAND_RAISED_POSITION = new Vector3(-0.1, -0.2, 0.62)
+const LEFT_HAND_RAISED_POSITION = new Vector3(-0.05, -0.35, 0.68)
 const LEFT_HAND_BASE_ROTATION = new Vector3(0.3, 0.25, 0.2)
-const LEFT_HAND_RAISED_ROTATION = new Vector3(0.45, -0.5, -0.65)
+const LEFT_HAND_RAISED_ROTATION = new Vector3(0.35, -0.45, -0.55)
 
 const SMOKING_PHASE_LIGHTER_RISE = 0.65
 const SMOKING_PHASE_FLAME_START = 0.45
@@ -664,9 +664,9 @@ export class PlayerController {
     if (!this.lighterModel) {
       const lighter = buildLighterModel(this.scene, 'held-lighter')
       lighter.root.parent = this.leftHandRoot
-      lighter.root.position.set(-0.04, 0.08, 0.05)
-      lighter.root.rotation.set(-0.25, 0.1, -0.15)
-      lighter.root.scaling.setAll(0.6)
+      lighter.root.position.set(-0.02, -0.08, 0.06)
+      lighter.root.rotation.set(-0.35, 0.1, -0.15)
+      lighter.root.scaling.setAll(0.46)
       this.lighterModel = lighter
     }
     if (!this.smokeParticles) {
