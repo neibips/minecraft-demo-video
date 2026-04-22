@@ -271,6 +271,7 @@ export class Minecraft2Game {
       this.lighting,
     )
     this.player = new PlayerController(this.scene, this.ui.canvas, this.worldManager, {
+      onCigaretteIgnite: () => this.audio.playSfx('lighter'),
       onToggleInventory: () => this.toggleInventory(),
       onTogglePause: () => this.togglePause(),
     })
@@ -1052,9 +1053,6 @@ export class Minecraft2Game {
       }
     } else {
       this.stepAccumulator = Math.min(this.stepAccumulator, 0.3)
-    }
-    if (!this.wasOnGround && this.player.onGround && this.mode === 'playing') {
-      this.audio.playSfx('land')
     }
     this.wasOnGround = this.player.onGround
   }

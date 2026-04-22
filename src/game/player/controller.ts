@@ -66,6 +66,12 @@ const SMOKING_PHASE_MOUTH_RAISE_END = 2.75
 const SMOKING_PHASE_SMOKE_HOLD_END = 5.4
 const SMOKING_PHASE_RETURN_END = 6.3
 const SMOKE_PARTICLES_FADE_OUT = 1.1
+const PLAYER_CAMERA_FOV = 1.1
+const CIGARETTE_DIZZINESS_DURATION = 7
+const DIZZINESS_YAW_AMPLITUDE = 0.028
+const DIZZINESS_PITCH_AMPLITUDE = 0.018
+const DIZZINESS_ROLL_AMPLITUDE = 0.045
+const DIZZINESS_FOV_AMPLITUDE = 0.035
 
 interface HeldTransform {
   position: Vector3
@@ -110,6 +116,7 @@ const HELD_PRESETS: Record<HeldKind, HeldTransform> = {
 }
 
 interface PlayerCallbacks {
+  onCigaretteIgnite: () => void
   onToggleInventory: () => void
   onTogglePause: () => void
 }
@@ -156,6 +163,9 @@ export class PlayerController {
   private smokingTime = -1
   private cigaretteActive = false
   private smokingMouthRaise = 0
+  private lighterSoundTriggered = false
+  private dizzinessRemaining = 0
+  private dizzinessOscillationTime = 0
 
   constructor(
     scene: Scene,
@@ -171,7 +181,7 @@ export class PlayerController {
     this.camera = new UniversalCamera('player-camera', new Vector3(0, 0, 0), scene)
     this.camera.inputs.clear()
     this.camera.minZ = 0.05
-    this.camera.fov = 1.1
+    this.camera.fov = PLAYER_CAMERA_FOV
     scene.activeCamera = this.camera
 
     this.armMesh = MeshBuilder.CreateBox(
@@ -367,10 +377,17 @@ export class PlayerController {
   }
 
   getLookVector(): Vector3 {
+    const dizziness = this.getDizzinessOffsets()
+    const yaw = this.yaw + dizziness.yaw
+    const pitch = clamp(
+      this.pitch + dizziness.pitch,
+      -Math.PI / 2 + 0.02,
+      Math.PI / 2 - 0.02,
+    )
     const direction = new Vector3(
-      Math.sin(this.yaw) * Math.cos(this.pitch),
-      Math.sin(this.pitch),
-      Math.cos(this.yaw) * Math.cos(this.pitch),
+      Math.sin(yaw) * Math.cos(pitch),
+      Math.sin(pitch),
+      Math.cos(yaw) * Math.cos(pitch),
     )
     return direction.normalize()
   }
@@ -594,6 +611,11 @@ export class PlayerController {
       this.lastGroundY = previousY
     }
 
+    if (this.dizzinessRemaining > 0) {
+      this.dizzinessRemaining = Math.max(0, this.dizzinessRemaining - deltaSeconds)
+      this.dizzinessOscillationTime += deltaSeconds
+    }
+
     this.syncCamera(eyeHeight)
     this.updateHandAnimation(deltaSeconds, movementEnabled)
   }
@@ -637,6 +659,7 @@ export class PlayerController {
     if (this.smokingTime >= 0) return false
     this.ensureSmokingProps()
     this.smokingTime = 0
+    this.lighterSoundTriggered = false
     this.leftHandRoot.setEnabled(true)
     this.leftHandRoot.position.copyFrom(LEFT_HAND_BASE_POSITION)
     this.leftHandRoot.rotation.copyFrom(LEFT_HAND_BASE_ROTATION)
@@ -704,6 +727,7 @@ export class PlayerController {
     if (this.smokingTime < 0) return
     this.smokingTime = -1
     this.smokingMouthRaise = 0
+    this.lighterSoundTriggered = false
     this.leftHandRoot.setEnabled(false)
     this.leftHandRoot.position.copyFrom(LEFT_HAND_BASE_POSITION)
     this.leftHandRoot.rotation.copyFrom(LEFT_HAND_BASE_ROTATION)
@@ -724,6 +748,38 @@ export class PlayerController {
     if (b <= a) return x < a ? 0 : 1
     const t = clamp((x - a) / (b - a), 0, 1)
     return t * t * (3 - 2 * t)
+  }
+
+  private startDizziness(durationSeconds = CIGARETTE_DIZZINESS_DURATION): void {
+    this.dizzinessRemaining = durationSeconds
+    this.dizzinessOscillationTime = 0
+  }
+
+  private getDizzinessOffsets(): { yaw: number; pitch: number; roll: number; fov: number } {
+    if (this.dizzinessRemaining <= 0) {
+      return { yaw: 0, pitch: 0, roll: 0, fov: 0 }
+    }
+
+    const strengthBase = clamp(this.dizzinessRemaining / CIGARETTE_DIZZINESS_DURATION, 0, 1)
+    const strength = strengthBase * strengthBase * (3 - 2 * strengthBase)
+    const primaryWave = this.dizzinessOscillationTime * 3.4
+    const secondaryWave = this.dizzinessOscillationTime * 5.7 + 0.85
+
+    return {
+      yaw: Math.sin(primaryWave) * DIZZINESS_YAW_AMPLITUDE * strength,
+      pitch:
+        (Math.cos(primaryWave * 0.7) * 0.75 + Math.sin(secondaryWave) * 0.25) *
+        DIZZINESS_PITCH_AMPLITUDE *
+        strength,
+      roll:
+        Math.sin(primaryWave * 0.9 + Math.sin(secondaryWave) * 0.5) *
+        DIZZINESS_ROLL_AMPLITUDE *
+        strength,
+      fov:
+        (Math.sin(secondaryWave * 0.8) * 0.65 + Math.cos(primaryWave * 0.45) * 0.35) *
+        DIZZINESS_FOV_AMPLITUDE *
+        strength,
+    }
   }
 
   private updateSmokingAnimation(deltaSeconds: number): void {
@@ -808,6 +864,7 @@ export class PlayerController {
       Vector3.LerpToRef(CIGARETTE_MOUTH_ROTATION, CIGARETTE_BASE_ROTATION, f, cigRoot.rotation)
     } else {
       this.stopSmoking()
+      this.startDizziness()
       return
     }
 
@@ -816,6 +873,10 @@ export class PlayerController {
       const flameActive = t >= SMOKING_PHASE_FLAME_START && t < SMOKING_PHASE_FLAME_END
       this.lighterModel.flameMesh.isVisible = flameActive
       if (flameActive) {
+        if (!this.lighterSoundTriggered) {
+          this.lighterSoundTriggered = true
+          this.callbacks.onCigaretteIgnite()
+        }
         const flicker = 0.8 + Math.sin(t * 45) * 0.12 + Math.random() * 0.12
         this.lighterModel.flameMesh.scaling.set(1, flicker, 1)
         if (this.lighterFlameParticles && !this.lighterFlameParticles.isStarted()) {
@@ -869,8 +930,15 @@ export class PlayerController {
   }
 
   private syncCamera(eyeHeight = PLAYER_EYE_HEIGHT): void {
+    const dizziness = this.getDizzinessOffsets()
+    const pitch = clamp(
+      this.pitch + dizziness.pitch,
+      -Math.PI / 2 + 0.02,
+      Math.PI / 2 - 0.02,
+    )
     this.camera.position.set(this.position.x, this.position.y + eyeHeight, this.position.z)
-    this.camera.rotation.set(-this.pitch, this.yaw, 0)
+    this.camera.rotation.set(-pitch, this.yaw + dizziness.yaw, dizziness.roll)
+    this.camera.fov = PLAYER_CAMERA_FOV + dizziness.fov
   }
 
   private collides(position: Vector3, height: number): boolean {

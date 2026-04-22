@@ -7,7 +7,7 @@ const soundImports = import.meta.glob('../../../assets/sounds/**/*.mp3', {
 }) as Record<string, string>
 
 export type AmbientKey = 'music' | 'world'
-export type SfxKey = 'step' | 'land' | 'swing' | 'chicken' | 'spider' | 'godzilla'
+export type SfxKey = 'step' | 'land' | 'swing' | 'lighter' | 'chicken' | 'spider' | 'godzilla'
 
 interface SfxSlice {
   offset: number
@@ -84,6 +84,14 @@ const SFX_CONFIG: Record<SfxKey, SfxConfig> = {
       { offset: 1.008, duration: 0.18 },
       { offset: 2.019, duration: 0.18 },
     ],
+  },
+  lighter: {
+    pathMatch: 'lighter/',
+    volume: 0.34,
+    maxDistance: 2,
+    minIntervalMs: 700,
+    maxConcurrent: 1,
+    slices: [{ offset: 0, duration: 0.8 }],
   },
   chicken: {
     pathMatch: 'chicken/',
